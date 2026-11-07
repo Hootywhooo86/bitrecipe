@@ -35,7 +35,12 @@ let wakeLock = null;
 // ---------- state for the open recipe ----------
 const session = { draft: null, flags: [], servings: {}, done: {}, have: {}, cook: null, pendingInput: '' };
 const theme = () => db.theme.custom || PRESETS[db.theme.preset] || PRESETS.tomato;
-applyTheme(theme());
+// Status/navigation bars take the theme colour, with dark or light icons to match.
+function paint(t) {
+  applyTheme(t);
+  BitNative?.setBars({ color: t.bg, light: document.documentElement.dataset.light === '1' }).catch(() => {});
+}
+paint(theme());
 
 const $app = document.getElementById('app');
 const go = (hash) => { location.hash = hash; };
@@ -520,7 +525,7 @@ $app.addEventListener('input', (e) => {
   }
   if (e.target.dataset.color) {
     db.theme.custom = { ...theme(), [e.target.dataset.color]: e.target.value };
-    applyTheme(db.theme.custom);
+    paint(db.theme.custom);
     save();
   }
 });
@@ -598,9 +603,9 @@ $app.addEventListener('click', (e) => {
   }
 
   // theme screen
-  if (d.preset) { db.theme = { preset: d.preset, custom: null }; applyTheme(theme()); save(); return rerender(); }
-  if (t.id === 'fixc') { db.theme.custom = fixContrast(theme()); applyTheme(db.theme.custom); save(); return rerender(); }
-  if (t.id === 'resetc') { db.theme.custom = null; applyTheme(theme()); save(); return rerender(); }
+  if (d.preset) { db.theme = { preset: d.preset, custom: null }; paint(theme()); save(); return rerender(); }
+  if (t.id === 'fixc') { db.theme.custom = fixContrast(theme()); paint(db.theme.custom); save(); return rerender(); }
+  if (t.id === 'resetc') { db.theme.custom = null; paint(theme()); save(); return rerender(); }
 });
 
 document.addEventListener('keydown', (e) => {

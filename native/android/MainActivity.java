@@ -2,6 +2,11 @@ package com.bit128.bitrecipe;
 
 import android.content.Intent;
 import android.os.Bundle;
+import android.view.View;
+import androidx.core.graphics.Insets;
+import androidx.core.view.ViewCompat;
+import androidx.core.view.WindowCompat;
+import androidx.core.view.WindowInsetsCompat;
 import com.getcapacitor.BridgeActivity;
 
 public class MainActivity extends BridgeActivity {
@@ -9,6 +14,17 @@ public class MainActivity extends BridgeActivity {
     public void onCreate(Bundle savedInstanceState) {
         registerPlugin(BitNativePlugin.class);
         super.onCreate(savedInstanceState);
+
+        // Keep the app below the status bar (notifications) and above the
+        // navigation bar, never drawn underneath them.
+        WindowCompat.setDecorFitsSystemWindows(getWindow(), true);
+        View root = findViewById(android.R.id.content);
+        ViewCompat.setOnApplyWindowInsetsListener(root, (v, insets) -> {
+            Insets bars = insets.getInsets(WindowInsetsCompat.Type.systemBars() | WindowInsetsCompat.Type.displayCutout());
+            v.setPadding(bars.left, bars.top, bars.right, bars.bottom);
+            return WindowInsetsCompat.CONSUMED;
+        });
+
         BitNativePlugin.handleIntent(getIntent());
     }
 

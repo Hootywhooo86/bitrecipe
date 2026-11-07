@@ -1,7 +1,11 @@
 package com.bit128.bitrecipe;
 
 import android.content.Intent;
+import android.graphics.Color;
+import android.view.Window;
 import android.view.WindowManager;
+import androidx.core.view.WindowCompat;
+import androidx.core.view.WindowInsetsControllerCompat;
 import com.getcapacitor.JSObject;
 import com.getcapacitor.Plugin;
 import com.getcapacitor.PluginCall;
@@ -12,6 +16,7 @@ import com.getcapacitor.annotation.CapacitorPlugin;
  * Small native helpers for bitrecipe:
  *  - receives links/text shared from TikTok, Instagram, Chrome etc. (share sheet)
  *  - keeps the screen awake while cook mode is open
+ *  - colours the status and navigation bars to match the current theme
  */
 @CapacitorPlugin(name = "BitNative")
 public class BitNativePlugin extends Plugin {
@@ -46,6 +51,23 @@ public class BitNativePlugin extends Plugin {
         getActivity().runOnUiThread(() -> {
             if (on) getActivity().getWindow().addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);
             else getActivity().getWindow().clearFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);
+        });
+        call.resolve();
+    }
+
+    @PluginMethod
+    public void setBars(PluginCall call) {
+        final String color = call.getString("color", "#0b0b16");
+        final boolean light = Boolean.TRUE.equals(call.getBoolean("light", false));
+        getActivity().runOnUiThread(() -> {
+            Window w = getActivity().getWindow();
+            int c;
+            try { c = Color.parseColor(color); } catch (IllegalArgumentException e) { c = Color.BLACK; }
+            w.setStatusBarColor(c);
+            w.setNavigationBarColor(c);
+            WindowInsetsControllerCompat ic = WindowCompat.getInsetsController(w, w.getDecorView());
+            ic.setAppearanceLightStatusBars(light);
+            ic.setAppearanceLightNavigationBars(light);
         });
         call.resolve();
     }
