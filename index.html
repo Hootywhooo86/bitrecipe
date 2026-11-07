@@ -1,0 +1,226 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>bitrecipe — Recipes, but chunkier.</title>
+<meta name="description" content="bitrecipe is the 128bit family's pixel recipe scraper: paste any recipe link, get a clean readable card — ingredients, steps, no life story. Coming soon.">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Press+Start+2P&family=Inter:wght@400;600;800&display=swap" rel="stylesheet">
+<style>
+  :root{
+    --bg:#0b0b16;
+    --panel:#141428;
+    --tomato:#ff5d5d;
+    --tomato-deep:#b91c1c;
+    --yellow:#facc15;
+    --orange:#ff9f1c;
+    --green:#22c55e;
+    --ink:#f4f1ff;
+    --muted:#9a97b8;
+  }
+  *{box-sizing:border-box;margin:0;padding:0}
+  body{background:var(--bg);color:var(--ink);font-family:'Inter',system-ui,sans-serif;overflow-x:hidden}
+  body::before{content:"";position:fixed;inset:0;pointer-events:none;z-index:0;background-image:radial-gradient(rgba(255,93,93,.08) 1px, transparent 1px);background-size:22px 22px}
+  .wrap{max-width:960px;margin:0 auto;padding:0 20px;position:relative;z-index:1}
+  nav{display:flex;justify-content:space-between;align-items:center;padding:22px 0}
+  .logo{display:flex;align-items:center;gap:12px;font-family:'Press Start 2P',monospace;font-size:15px}
+  .logo-mark{width:34px;height:34px;background:var(--tomato);display:grid;place-items:center;font-size:18px;box-shadow:0 4px 0 var(--tomato-deep), 4px 0 0 var(--tomato-deep), -4px 0 0 var(--tomato-deep), 0 -4px 0 var(--tomato-deep);image-rendering:pixelated}
+  .badge{font-family:'Press Start 2P',monospace;font-size:9px;color:var(--bg);background:var(--yellow);padding:8px 10px;letter-spacing:1px;box-shadow:0 4px 0 #a16207}
+  header{text-align:center;padding:52px 0 30px}
+  .eyebrow{font-family:'Press Start 2P',monospace;font-size:10px;color:var(--tomato);letter-spacing:2px;margin-bottom:26px}
+  h1{font-family:'Press Start 2P',monospace;font-size:clamp(22px,5.5vw,44px);line-height:1.35;margin-bottom:24px;text-shadow:0 4px 0 #1a1a33, 4px 0 0 #1a1a33}
+  h1 .r{color:var(--tomato)} h1 .y{color:var(--yellow)}
+  .sub{color:var(--muted);font-size:18px;max-width:620px;margin:0 auto 20px;line-height:1.6}
+  .try{font-family:'Press Start 2P',monospace;font-size:9px;color:var(--tomato);letter-spacing:1px;margin-bottom:26px}
+  .scraper{background:var(--panel);border:3px solid #2a2a4a;box-shadow:8px 8px 0 #000;padding:20px;margin-bottom:36px}
+  .url-row{display:flex;gap:10px;flex-wrap:wrap}
+  .url-row input{flex:1;min-width:240px;padding:14px;background:#0b0b16;border:3px solid #2a2a4a;color:var(--ink);font-size:14px}
+  .url-row button{font-family:'Press Start 2P',monospace;font-size:10px;padding:14px 18px;background:var(--tomato);color:#fff;border:none;cursor:pointer;box-shadow:0 4px 0 var(--tomato-deep)}
+  .samples{margin-top:14px;font-size:13px;color:var(--muted)}
+  .samples button{background:none;border:none;color:var(--yellow);cursor:pointer;font-size:13px;font-weight:600;padding:2px 4px;text-decoration:underline}
+  .recipe{display:flex;gap:0;background:var(--panel);border:3px solid #2a2a4a;box-shadow:8px 8px 0 #000;margin-bottom:36px;min-height:420px}
+  .ing{width:280px;flex-shrink:0;border-right:3px solid #2a2a4a;padding:18px}
+  .ing h3,.main h3{font-family:'Press Start 2P',monospace;font-size:11px;color:var(--tomato);margin-bottom:14px}
+  .item{display:flex;gap:10px;padding:10px 0;border-bottom:2px solid #2a2a4a;cursor:pointer;align-items:flex-start;font-size:14px}
+  .item:hover{background:#1a1a33}
+  .item .box{width:22px;height:22px;border:3px solid #2a2a4a;flex-shrink:0;display:grid;place-items:center;font-size:14px}
+  .item.done .box{background:var(--green);border-color:#15803d;color:#0b0b16}
+  .item.done span{color:var(--muted);text-decoration:line-through}
+  .main{flex:1;padding:18px;min-width:0}
+  .main h2{font-size:20px;font-weight:800;margin-bottom:6px}
+  .meta{color:var(--muted);font-size:13px;margin-bottom:6px}
+  .meta b{color:var(--yellow)}
+  .servings{margin:12px 0;display:flex;gap:8px;align-items:center;font-size:14px}
+  .servings button{background:#1f1f3a;color:var(--ink);border:3px solid #2a2a4a;width:34px;height:34px;cursor:pointer;font-size:16px;font-weight:800}
+  .step{display:flex;gap:12px;padding:12px 0;border-bottom:2px solid #2a2a4a;cursor:pointer;align-items:flex-start}
+  .step:hover{background:#1a1a33}
+  .step .n{font-family:'Press Start 2P',monospace;font-size:11px;color:var(--yellow);flex-shrink:0;padding-top:2px}
+  .step.done .n{color:var(--green)}
+  .step.done .t{color:var(--muted);text-decoration:line-through}
+  .step .t{font-size:14px;line-height:1.5}
+  .actions{display:flex;gap:10px;flex-wrap:wrap;margin-top:16px}
+  .actions button{font-family:'Press Start 2P',monospace;font-size:9px;padding:12px 14px;background:#1f1f3a;color:var(--ink);border:3px solid #2a2a4a;cursor:pointer}
+  .actions button.on{background:var(--tomato);border-color:var(--tomato-deep);color:#fff}
+  .quest{margin-top:16px;background:#1f1f3a;padding:12px;font-size:13px;line-height:1.6}
+  .quest b{color:var(--tomato)}
+  .quest .bar{height:10px;background:#0b0b16;margin-top:8px}
+  .quest .bar i{display:block;height:100%;background:var(--tomato);width:0%;transition:width .3s}
+  .features{display:grid;grid-template-columns:repeat(auto-fit,minmax(240px,1fr));gap:18px;padding:10px 0 36px}
+  .feat{background:var(--panel);border:3px solid #2a2a4a;padding:20px}
+  .feat h3{font-family:'Press Start 2P',monospace;font-size:11px;margin-bottom:10px;color:var(--tomato)}
+  .feat p{color:var(--muted);font-size:14px;line-height:1.6}
+  .waitlist{background:var(--panel);border:3px solid #2a2a4a;padding:28px;text-align:center;margin-bottom:40px}
+  .waitlist h2{font-family:'Press Start 2P',monospace;font-size:14px;margin-bottom:16px}
+  .waitlist form{display:flex;gap:10px;justify-content:center;flex-wrap:wrap}
+  .waitlist input{padding:12px 14px;background:#0b0b16;border:3px solid #2a2a4a;color:var(--ink);font-size:14px;min-width:240px}
+  .waitlist button{font-family:'Press Start 2P',monospace;font-size:10px;padding:12px 18px;background:var(--tomato);color:#fff;border:none;cursor:pointer;box-shadow:0 4px 0 var(--tomato-deep)}
+  .waitlist .note{color:var(--muted);font-size:13px;margin-top:12px}
+  footer{text-align:center;color:var(--muted);font-size:13px;padding:20px 0 40px}
+  .toast{position:fixed;left:50%;bottom:28px;transform:translateX(-50%) translateY(80px);background:var(--tomato);color:#fff;font-family:'Press Start 2P',monospace;font-size:11px;padding:14px 20px;box-shadow:0 4px 0 var(--tomato-deep);transition:transform .3s;z-index:30}
+  .toast.show{transform:translateX(-50%) translateY(0)}
+  body.cookmode{background:#14141f}
+  @media (max-width:700px){ .recipe{flex-direction:column} .ing{width:auto;border-right:none;border-bottom:3px solid #2a2a4a} }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <nav>
+    <div class="logo"><span class="logo-mark">🍳</span> bitrecipe</div>
+    <span class="badge">COMING SOON</span>
+  </nav>
+
+  <header>
+    <div class="eyebrow">PART OF THE 128BIT FAMILY</div>
+    <h1>Recipes, but <span class="r">chunkier</span>.</h1>
+    <p class="sub">Paste any recipe link, skip the life story. bitrecipe scrapes the page and hands you a clean card: ingredients, steps, times — nothing else in the way.</p>
+    <div class="try">▼ TRY THE MOCK BELOW — PASTE A LINK, CHECK OFF INGREDIENTS, TAP STEPS DONE ▼</div>
+  </header>
+
+  <section class="scraper">
+    <div class="url-row">
+      <input id="urlInput" type="url" placeholder="Paste a recipe link… e.g. https://example.com/creamy-garlic-chicken-pasta">
+      <button id="scrapeBtn">SCRAPE IT</button>
+    </div>
+    <p class="samples">No link handy? Try a sample:
+      <button data-recipe="pasta">Creamy Garlic Chicken Pasta</button> ·
+      <button data-recipe="tacos">Sheet Pan Tacos</button> ·
+      <button data-recipe="soup">Slow Cooker Tomato Soup</button>
+    </p>
+  </section>
+
+  <section class="recipe">
+    <div class="ing">
+      <h3>🧂 INGREDIENTS</h3>
+      <div id="ingList"></div>
+      <div class="quest">
+        <b>QUEST: FIRST CLEAN RECIPE</b><br>
+        Finish a recipe to earn +25 XP.
+        <div class="bar"><i id="questbar"></i></div>
+        <span id="questtext">0 / 5 steps done</span>
+        <div style="margin-top:8px">🔥 Streak: <b>3 recipes cooked</b></div>
+      </div>
+    </div>
+    <div class="main">
+      <h2 id="recipeTitle">Creamy Garlic Chicken Pasta</h2>
+      <p class="meta">⏱️ <b>30 min</b> · 🍽️ Serves <b id="servesOut">4</b> · ⭐ 4.8 · Scraped from <span id="sourceOut">example.com</span></p>
+      <div class="servings">
+        Servings:
+        <button id="minusBtn">−</button>
+        <b id="servesNum">4</b>
+        <button id="plusBtn">+</button>
+        <span style="color:var(--muted);font-size:12px">amounts scale with servings</span>
+      </div>
+      <h3>👨‍🍳 STEPS</h3>
+      <div id="stepList"></div>
+      <div class="actions">
+        <button id="cookBtn">🍳 COOK MODE</button>
+        <button id="saveBtn">💾 SAVE RECIPE</button>
+        <button id="shareBtn">📤 SHARE</button>
+      </div>
+    </div>
+  </section>
+
+  <section class="features">
+    <div class="feat"><h3>🔗 PASTE → CLEAN CARD</h3><p>Any recipe site, one clean card. No pop-ups, no 2,000-word backstory, no ads in the middle of the steps.</p></div>
+    <div class="feat"><h3>✅ TAP TO CHECK OFF</h3><p>Ingredients and steps you can tick off as you cook — with amounts that scale when you change servings.</p></div>
+    <div class="feat"><h3>🍳 COOK MODE</h3><p>Big text, screen stays awake, one step at a time. Built for messy hands and flour everywhere.</p></div>
+    <div class="feat"><h3>🎮 COOKING QUESTS</h3><p>Finished recipes pay XP into 128bitlife. Cook streaks, new-cuisine badges, and a family cookbook that grows.</p></div>
+  </section>
+
+  <section class="waitlist">
+    <h2>JOIN THE WAITLIST</h2>
+    <form id="waitlistForm">
+      <input type="email" placeholder="you@email.com" required>
+      <button type="submit">SIGN ME UP</button>
+    </form>
+    <p class="note" id="waitlistNote">Be first to know when bitrecipe launches.</p>
+  </section>
+
+  <footer>bitrecipe — a 128bit family app · Built with pixels, not promises.</footer>
+</div>
+<div class="toast" id="toast"></div>
+<script>
+  const recipes = {
+    pasta: {title:'Creamy Garlic Chicken Pasta', time:'30 min', serves:4, source:'example.com', ings:[['500 g','penne pasta'],['2','chicken breasts, sliced'],['4 cloves','garlic, minced'],['1 cup','heavy cream'],['1/2 cup','parmesan, grated'],['2 tbsp','butter'],['1 tsp','Italian seasoning'],['to taste','salt & pepper']], steps:['Boil the penne in salted water until al dente. Reserve 1/2 cup pasta water, then drain.','Melt butter in a large pan over medium-high heat. Cook the chicken 5–6 minutes until golden.','Add garlic and cook 30 seconds until fragrant.','Pour in the cream, parmesan, and Italian seasoning. Simmer 3–4 minutes until thick.','Toss in the pasta with a splash of pasta water. Season, serve, and eat.']},
+    tacos: {title:'Sheet Pan Tacos', time:'25 min', serves:4, source:'example.com', ings:[['500 g','ground beef'],['1 packet','taco seasoning'],['8','small tortillas'],['1 cup','shredded cheese'],['1','tomato, diced'],['1/2','red onion, diced'],['1','lime, wedges'],['to taste','sour cream & hot sauce']], steps:['Heat the oven to 200°C and line a sheet pan with parchment.','Brown the beef, drain, then stir in taco seasoning and 1/4 cup water.','Fill tortillas with beef and cheese, fold, and lay on the pan.','Bake 10–12 minutes until crisp and golden.','Top with tomato, onion, lime, sour cream, and hot sauce.']},
+    soup: {title:'Slow Cooker Tomato Soup', time:'4 hrs', serves:6, source:'example.com', ings:[['2 cans','crushed tomatoes'],['1','onion, diced'],['3 cloves','garlic, minced'],['2 cups','vegetable broth'],['1/2 cup','heavy cream'],['1 tbsp','tomato paste'],['1 tsp','sugar'],['to taste','basil & salt']], steps:['Add tomatoes, onion, garlic, broth, tomato paste, and sugar to the slow cooker.','Cook on low 4 hours (or high 2 hours).','Blend until smooth with an immersion blender.','Stir in the cream and season with salt.','Serve hot with basil and crusty bread.']}
+  };
+  let current = 'pasta', serves = 4, baseServes = 4, stepsDone = 0;
+  const toastEl = document.getElementById('toast');
+  let toastTimer;
+  function toast(msg){ toastEl.textContent = msg; toastEl.classList.add('show'); clearTimeout(toastTimer); toastTimer = setTimeout(()=>toastEl.classList.remove('show'), 2200); }
+  function scale(qty){
+    const n = parseFloat(qty);
+    if (isNaN(n)) return qty;
+    const v = n * serves / baseServes;
+    return (Number.isInteger(v) ? v : v.toFixed(1).replace(/\.0$/,'')) + ' ' + qty.replace(/^[\d./\s]+/, '');
+  }
+  function render(){
+    const r = recipes[current];
+    baseServes = r.serves;
+    document.getElementById('recipeTitle').textContent = r.title;
+    document.getElementById('sourceOut').textContent = r.source;
+    document.getElementById('servesOut').textContent = serves;
+    document.getElementById('servesNum').textContent = serves;
+    document.querySelector('.meta').innerHTML = '⏱️ <b>' + r.time + '</b> · 🍽️ Serves <b id="servesOut">' + serves + '</b> · ⭐ 4.8 · Scraped from <span id="sourceOut">' + r.source + '</span>';
+    const ingEl = document.getElementById('ingList'); ingEl.innerHTML = '';
+    r.ings.forEach(([q, name]) => {
+      const d = document.createElement('div'); d.className = 'item';
+      d.innerHTML = '<span class="box"></span><span><b>' + scale(q) + '</b> ' + name + '</span>';
+      d.addEventListener('click', () => { d.classList.toggle('done'); d.querySelector('.box').textContent = d.classList.contains('done') ? '✓' : ''; });
+      ingEl.appendChild(d);
+    });
+    const stepEl = document.getElementById('stepList'); stepEl.innerHTML = ''; stepsDone = 0;
+    r.steps.forEach((s, i) => {
+      const d = document.createElement('div'); d.className = 'step';
+      d.innerHTML = '<span class="n">' + (i+1) + '</span><div class="t">' + s + '</div>';
+      d.addEventListener('click', () => {
+        const done = d.classList.toggle('done'); stepsDone += done ? 1 : -1;
+        document.getElementById('questbar').style.width = (stepsDone / r.steps.length * 100) + '%';
+        document.getElementById('questtext').textContent = stepsDone + ' / ' + r.steps.length + ' steps done';
+        if (stepsDone === r.steps.length) toast('QUEST COMPLETE! +25 XP — FIRST CLEAN RECIPE');
+      });
+      stepEl.appendChild(d);
+    });
+    document.getElementById('questbar').style.width = '0%';
+    document.getElementById('questtext').textContent = '0 / ' + r.steps.length + ' steps done';
+  }
+  document.querySelectorAll('.samples button').forEach(b => b.addEventListener('click', () => { current = b.dataset.recipe; serves = recipes[current].serves; render(); toast('SCRAPED ✓ — ' + recipes[current].title.toUpperCase()); }));
+  document.getElementById('scrapeBtn').addEventListener('click', () => {
+    const url = document.getElementById('urlInput').value.trim();
+    if (!url) { toast('PASTE A RECIPE LINK FIRST'); return; }
+    try { document.getElementById('sourceOut').textContent = new URL(url).hostname; } catch(e) {}
+    toast('SCRAPED ✓ — CLEAN CARD READY'); render();
+  });
+  document.getElementById('minusBtn').addEventListener('click', () => { if (serves > 1) { serves--; render(); } });
+  document.getElementById('plusBtn').addEventListener('click', () => { if (serves < 12) { serves++; render(); } });
+  document.getElementById('cookBtn').addEventListener('click', e => { document.body.classList.toggle('cookmode'); e.target.classList.toggle('on'); toast(document.body.classList.contains('cookmode') ? 'COOK MODE ON — BIG TEXT' : 'COOK MODE OFF'); });
+  document.getElementById('saveBtn').addEventListener('click', () => toast('+15 XP — RECIPE SAVED'));
+  document.getElementById('shareBtn').addEventListener('click', () => toast('LINK COPIED — SHARE IT'));
+  document.getElementById('waitlistForm').addEventListener('submit', e => { e.preventDefault(); document.getElementById('waitlistNote').textContent = 'You are on the list. +10 XP for joining early.'; toast('+10 XP — WAITLIST JOINED'); e.target.reset(); });
+  render();
+</script>
+</body>
+</html>
