@@ -35,15 +35,19 @@ jobs:
         with:
           name: bitrecipe-apk
           path: bitrecipe-debug.apk
-      - name: Publish GitHub Release (version tags only)
-        if: startsWith(github.ref, 'refs/tags/v')
+      - name: Publish GitHub Release
         uses: softprops/action-gh-release@v2
         with:
-          name: bitrecipe ${{ github.ref_name }}
+          tag_name: ${{ startsWith(github.ref, 'refs/tags/') && github.ref_name || format('v0.1.{0}', github.run_number) }}
+          target_commitish: ${{ github.sha }}
+          name: bitrecipe ${{ startsWith(github.ref, 'refs/tags/') && github.ref_name || format('v0.1.{0}', github.run_number) }}
+          make_latest: true
           files: bitrecipe-debug.apk
           body: |
             bitrecipe for Android.
 
             **Install:** download `bitrecipe-debug.apk` below on your phone, open it, and allow "install unknown apps" when Android asks.
+
+            Always-newest download: https://github.com/${{ github.repository }}/releases/latest/download/bitrecipe-debug.apk
 
             This is a debug (test) build, not a Play Store build.

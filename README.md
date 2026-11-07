@@ -48,7 +48,7 @@ Imported recipes get their tracks guessed from phrases like "meanwhile", "in a s
 
 ### Getting the APK
 
-- **From GitHub:** every push that touches the app runs `.github/workflows/android.yml`. Open the run under the **Actions** tab and download the `bitrecipe-apk` artifact, which contains `bitrecipe-debug.apk`. Copy it to your phone and allow "install unknown apps".
+- **From GitHub Releases:** every push that touches the app builds the APK and publishes it as a new release (v0.1.N). The newest is always at https://github.com/Hootywhooo86/bitrecipe/releases/latest/download/bitrecipe-debug.apk. Open that on your phone and allow "install unknown apps".
 - **Locally** (needs the Android SDK and Java 17): `npm install && npm run android:build`. The APK is written to `android/app/build/outputs/apk/debug/`.
 - **Browser preview:** `npm run serve`, then open http://localhost:8080. Link import only works inside the APK, because browsers block reading other sites. Pasted text works everywhere.
 
