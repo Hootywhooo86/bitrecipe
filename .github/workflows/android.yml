@@ -22,8 +22,6 @@ jobs:
         with:
           distribution: temurin
           java-version: 17
-      - name: Use the fixed bitrecipe signing key (so new builds install as updates)
-        run: mkdir -p ~/.android && cp native/android/debug.keystore ~/.android/debug.keystore
       - name: Generate Android project
         env:
           BITRECIPE_VERSION: 0.1.${{ github.run_number }}
@@ -36,6 +34,13 @@ jobs:
         run: ./gradlew assembleDebug --no-daemon
       - name: Rename APK
         run: cp android/app/build/outputs/apk/debug/app-debug.apk bitrecipe-debug.apk
+      - name: Check the APK is signed with the bitrecipe key (or updates won't install)
+        run: |
+          want=$(keytool -list -v -keystore native/android/debug.keystore -storepass android | grep -m1 'SHA256:' | awk '{print $2}')
+          got=$("$ANDROID_HOME"/build-tools/$(ls "$ANDROID_HOME"/build-tools | sort -V | tail -1)/apksigner verify --print-certs bitrecipe-debug.apk | grep -m1 'SHA-256 digest' | awk '{print $NF}' | tr -d ':' | tr a-f A-F)
+          want=$(echo "$want" | tr -d ':')
+          echo "expected $want"; echo "got      $got"
+          [ "$want" = "$got" ]
       - uses: actions/upload-artifact@v4
         with:
           name: bitrecipe-apk
@@ -54,5 +59,7 @@ jobs:
             **Install:** download `bitrecipe-debug.apk` below on your phone, open it, and allow "install unknown apps" when Android asks.
 
             Always-newest download: https://github.com/${{ github.repository }}/releases/latest/download/bitrecipe-debug.apk
+
+            Installs over any bitrecipe from v0.1.10 on and keeps your recipes. (Test builds v0.1.9 and older appear as a separate app; move recipes with Settings › Backup.)
 
             This is a debug (test) build, not a Play Store build.

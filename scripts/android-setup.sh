@@ -68,6 +68,34 @@ fi
 npx capacitor-assets generate --android \
   --iconBackgroundColor '#0b0b16' --iconBackgroundColorDark '#0b0b16' \
   --splashBackgroundColor '#0b0b16' --splashBackgroundColorDark '#0b0b16'
+GRADLE=android/app/build.gradle
+# Sign every build with the same key (native/android/debug.keystore) so new
+# versions install over old ones and keep your recipes.
+if ! grep -q 'bitrecipe-signing' "$GRADLE"; then
+  python3 - "$GRADLE" <<'PY'
+import sys
+p = sys.argv[1]
+s = open(p).read()
+block = '''
+    // bitrecipe-signing: one fixed key for every build
+    signingConfigs {
+        debug {
+            storeFile file("${rootDir}/../native/android/debug.keystore")
+            storePassword "android"
+            keyAlias "androiddebugkey"
+            keyPassword "android"
+        }
+    }
+'''
+s = s.replace('android {\n', 'android {\n' + block, 1)
+s = s.replace('buildTypes {', 'buildTypes {\n        debug {\n            signingConfig signingConfigs.debug\n        }', 1)
+open(p, 'w').write(s)
+PY
+fi
+# Installed app ID. ".app" so this installs next to the very first test builds,
+# which were signed with throwaway keys and can never be updated.
+sed -i 's/applicationId "com.bit128.bitrecipe"$/applicationId "com.bit128.bitrecipe.app"/' "$GRADLE"
+
 if [ -n "${BITRECIPE_BUILD:-}" ]; then
   sed -i -E "s/versionCode [0-9]+/versionCode ${BITRECIPE_BUILD}/; s/versionName \"[^\"]*\"/versionName \"${BITRECIPE_VERSION}\"/" android/app/build.gradle
 fi
