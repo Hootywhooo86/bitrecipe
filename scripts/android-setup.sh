@@ -5,6 +5,11 @@ set -euo pipefail
 cd "$(dirname "$0")/.."
 
 [ -d node_modules ] || npm install --no-audit --no-fund
+
+# Version shown in Settings (and used by the update check). CI sets these.
+if [ -n "${BITRECIPE_VERSION:-}" ]; then
+  printf "export const VERSION = '%s';\n" "$BITRECIPE_VERSION" > app/js/version.js
+fi
 [ -d android ] || npx cap add android
 
 PKG_DIR=android/app/src/main/java/com/bit128/bitrecipe
@@ -63,5 +68,8 @@ fi
 npx capacitor-assets generate --android \
   --iconBackgroundColor '#0b0b16' --iconBackgroundColorDark '#0b0b16' \
   --splashBackgroundColor '#0b0b16' --splashBackgroundColorDark '#0b0b16'
+if [ -n "${BITRECIPE_BUILD:-}" ]; then
+  sed -i -E "s/versionCode [0-9]+/versionCode ${BITRECIPE_BUILD}/; s/versionName \"[^\"]*\"/versionName \"${BITRECIPE_VERSION}\"/" android/app/build.gradle
+fi
 npx cap sync android
 echo "Android project ready. Build with: cd android && ./gradlew assembleDebug"

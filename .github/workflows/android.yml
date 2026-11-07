@@ -22,7 +22,12 @@ jobs:
         with:
           distribution: temurin
           java-version: 17
+      - name: Use the fixed bitrecipe signing key (so new builds install as updates)
+        run: mkdir -p ~/.android && cp native/android/debug.keystore ~/.android/debug.keystore
       - name: Generate Android project
+        env:
+          BITRECIPE_VERSION: 0.1.${{ github.run_number }}
+          BITRECIPE_BUILD: ${{ github.run_number }}
         run: |
           npm install --no-audit --no-fund
           bash scripts/android-setup.sh

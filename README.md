@@ -27,6 +27,10 @@ The real app lives in `app/` and is wrapped as an Android APK with Capacitor. Ev
 - **Timer alarms:** in the Android app every timer is a real alarm. It rings with the alarm sound when the app is closed or the screen is off, keeps ringing until you tap STOP, and is set to get through Do Not Disturb. Settings › Timer alerts asks for notification permission, exact timing and Do Not Disturb access, and has a 10-second test.
 - **Pinterest boards:** follow a public board in Settings. New pins that link to a recipe are imported automatically (board RSS → pin → recipe site → recipe data) and marked NEW for a quick check. bitrecipe checks when you open it. TikTok and Instagram don't let apps read saved collections, so those use the share sheet.
 - **Animations:** steam on the logo, bubbling timer pots with progress bars, screens and Track Map steps popping in, cook-mode wipes, a check-off pop and an arcade XP count-up. A Calm switch in Settings turns them off, and the phone's reduce-motion setting is respected.
+- **Grocery list:** tap 🛒 on any recipe card, or tick what you already have on a recipe and tap "Add missing to list". Everything merges into one list sorted by aisle ("2 eggs + 2 eggs = 4 eggs"; cups and grams of the same ingredient combine). Shows which recipe each item is for, has tick-off with a progress bar, extra items, clear ticked, and share as text.
+- **XP, levels and badges:** cook +50, save +10, your own version +15, first grocery list +5. Seven chef levels and ten badges, with drop-in banners and a level-up celebration. Events (`xp.earned`, `level.up`, `badge.unlocked`) are queued for 128bitlife.
+- **Pixel photos:** a recipe's photo (from the page, pin or TikTok thumbnail) is shrunk into a 96×64 pixel image and stored with the recipe, so it survives expired links and stays tiny.
+- **Testing tools:** "This import went wrong" shares a full report (input, what was found, what was made); Settings has backup/restore to a file, the version number, and an update check against GitHub Releases.
 - **My version:** copies a recipe so you can change it while the original stays untouched.
 - **Colours:** six presets plus a custom colour for every token, with a contrast check and a one-tap "fix readability". The logo recolours with the theme.
 - **Private by default.** Recipes stay on the phone (localStorage). Each recipe keeps its creator, original link and video timestamps.
@@ -51,6 +55,7 @@ Imported recipes get their tracks guessed from phrases like "meanwhile", "in a s
 
 ### Getting the APK
 
+- **Updates install over the top:** every build is signed with the same key (`native/android/debug.keystore`, a test key, not for the Play Store), so new versions keep your recipes. Builds before v0.1.8 used throwaway keys: uninstall those once.
 - **From GitHub Releases:** every push that touches the app builds the APK and publishes it as a new release (v0.1.N). The newest is always at https://github.com/Hootywhooo86/bitrecipe/releases/latest/download/bitrecipe-debug.apk. Open that on your phone and allow "install unknown apps".
 - **Locally** (needs the Android SDK and Java 17): `npm install && npm run android:build`. The APK is written to `android/app/build/outputs/apk/debug/`.
 - **Browser preview:** `npm run serve`, then open http://localhost:8080. Link import only works inside the APK, because browsers block reading other sites. Pasted text works everywhere.

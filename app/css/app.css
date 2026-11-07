@@ -248,3 +248,58 @@ body.typing .dock, body.typing .toast { display: none; }
 @keyframes dots { to { width: 2.2em; } }
 
 html.calm *, html.calm *::before, html.calm *::after { animation: none !important; transition: none !important; }
+
+/* ---------- sprites ---------- */
+.sprite { image-rendering: pixelated; vertical-align: middle; }
+.sprite .f1 { opacity: 0; }
+.chef .f0, .flame .f0 { animation: frameA .36s steps(1) infinite; }
+.chef .f1, .flame .f1 { animation: frameB .36s steps(1) infinite; }
+@keyframes frameA { 0% { opacity: 1; } 50% { opacity: 0; } }
+@keyframes frameB { 0% { opacity: 0; } 50% { opacity: 1; } }
+.runway { width: 220px; height: 44px; position: relative; }
+.runway .chef { position: absolute; bottom: 0; animation: run 2.4s steps(12) infinite; }
+@keyframes run { from { left: -10px; } to { left: 190px; } }
+.pill.off .flame { margin-right: 2px; }
+
+/* ---------- level, badges, celebrations ---------- */
+.lvl { display: block; width: 100%; text-align: left; color: var(--ink); cursor: pointer; }
+.lvtag { background: var(--accent2); color: var(--on-accent2); padding: 5px 7px; font-size: 9px; }
+.lvl b { font-size: 15px; }
+.xpbar { height: 14px; border: 3px solid var(--edge); background: var(--bg); margin: 10px 0 6px; position: relative; }
+.xpbar i { position: absolute; inset: 0 auto 0 0; background: repeating-linear-gradient(90deg, var(--accent2) 0 8px, var(--accent2-deep) 8px 10px); }
+.badges { display: grid; grid-template-columns: repeat(2, 1fr); gap: 10px; }
+.badge { border: 3px dashed var(--edge); padding: 12px; text-align: center; display: flex; flex-direction: column; align-items: center; gap: 6px; opacity: .45; filter: grayscale(1); }
+.badge.got { opacity: 1; filter: none; border-style: solid; border-color: var(--accent2); background: var(--panel); box-shadow: 4px 4px 0 #0006; }
+.badge b { font-size: 14px; } .badge span { font-size: 12px; color: var(--muted); }
+.celebrate { position: fixed; z-index: 90; left: 50%; top: calc(14px + var(--safe-top)); transform: translateX(-50%); display: flex; gap: 10px; align-items: center;
+  background: var(--panel); border: 3px solid var(--accent2); padding: 10px 14px; box-shadow: 5px 5px 0 #000a; animation: dropIn .4s steps(4); max-width: 92vw; }
+.celebrate div { display: flex; flex-direction: column; gap: 4px; }
+.celebrate b { font-size: 9px; color: var(--accent2); }
+.celebrate span { font-weight: 700; }
+.celebrate.big { top: 35%; flex-direction: column; text-align: center; padding: 22px 26px; }
+.celebrate.big b { font-size: 14px; } .celebrate.big span { font-size: 18px; }
+.celebrate.out { animation: dropOut .35s steps(3) forwards; }
+@keyframes dropIn { from { transform: translate(-50%, -40px); opacity: 0; } }
+@keyframes dropOut { to { transform: translate(-50%, -40px); opacity: 0; } }
+
+/* ---------- photos ---------- */
+.thumb { width: 84px; flex-shrink: 0; object-fit: cover; image-rendering: pixelated; border-right: 3px solid var(--edge); }
+.hero { margin: 0 -16px 14px; border-top: 3px solid var(--edge); border-bottom: 3px solid var(--edge); }
+.heroimg { display: block; width: 100%; aspect-ratio: 3 / 2; object-fit: cover; image-rendering: pixelated; }
+
+/* ---------- grocery ---------- */
+.rcard { position: relative; }
+.cardcart { position: absolute; right: 8px; bottom: 8px; width: 38px; height: 38px; background: var(--bg); border: 3px solid var(--edge); font-size: 16px; }
+.cardcart.on { background: var(--good); border-color: var(--good-deep); color: #08140c; font-weight: 900; }
+.rcard .body { padding-right: 50px; }
+.cartbtn { position: relative; }
+.cartbtn i { position: absolute; top: -8px; right: -8px; min-width: 20px; height: 20px; padding: 0 4px; background: var(--accent); color: var(--on-accent); font: 9px/20px var(--px); font-style: normal; }
+.cartbtn.bump { animation: pop .35s steps(3); }
+.lchip { display: inline-flex; gap: 6px; align-items: center; }
+.lchip a { color: var(--ink); font-weight: 700; text-decoration: none; }
+.lchip button { background: none; border: none; color: var(--muted); }
+.checklist li .x.pill { margin-left: auto; }
+.updbar { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
+.updbar .btn { padding: 10px 12px; }
+.empty .chef { display: block; margin: 0 auto; }
+@media (min-width: 640px) { .badges { grid-template-columns: repeat(3, 1fr); } }

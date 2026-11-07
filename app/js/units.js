@@ -53,9 +53,9 @@ export const UNIT_WORDS = [
 // grams per US cup, matched against the ingredient name (longest first).
 const DENSITY = [
   ['powdered sugar', 120], ['icing sugar', 120], ['brown sugar', 213], ['chocolate chips', 170],
-  ['cocoa', 85], ['flour', 120], ['sugar', 200], ['butter', 227], ['milk', 240], ['water', 240],
-  ['cream', 240], ['yogurt', 245], ['yoghurt', 245], ['oil', 218], ['honey', 340], ['oats', 90],
-  ['rice', 185], ['parmesan', 90], ['cheese', 113], ['stock', 240], ['broth', 240],
+  ['cocoa', 85], ['flour', 120], ['sugar', 200], ['butter', 227], ['yogurt', 245], ['yoghurt', 245],
+  ['honey', 340], ['oats', 90], ['rice', 185], ['parmesan', 90], ['cheese', 113],
+  // liquids (milk, water, cream, oil, stock) deliberately have no density: they stay ml / cups
 ];
 
 export function densityFor(item = '') {

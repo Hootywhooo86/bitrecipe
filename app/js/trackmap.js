@@ -13,6 +13,7 @@
 //   - hands-off steps (chill, bake) are dashed, with a one-tap named timer.
 
 import { amountText, itemText, minutesText } from './units.js';
+import { flame } from './sprites.js';
 
 export const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]);
 
@@ -108,7 +109,7 @@ export function renderTrackMap(recipe, ctx) {
     return `<div class="trow${done ? ' done' : ''}">
       <div class="tgraph" style="width:${width}px">${g}</div>
       <div class="tcard${s.wait ? ' wait' : ''}" data-step="${esc(s.id)}">
-        <div class="thead"><span class="sn">${String(i + 1).padStart(2, '0')}</span><span class="tag lane-${k + 1}">${esc(laneName(recipe, s.lane))}</span>${s.wait ? '<span class="pill off">hands-off</span>' : ''}${meanwhile}</div>
+        <div class="thead"><span class="sn">${String(i + 1).padStart(2, '0')}</span><span class="tag lane-${k + 1}">${esc(laneName(recipe, s.lane))}</span>${s.wait ? `<span class="pill off">${flame(10)} hands-off</span>` : ''}${meanwhile}</div>
         ${joins}
         <p>${renderText(s.text, recipe, ctx)}</p>
         ${timer || at ? `<div class="tfoot">${timer}${at}</div>` : ''}

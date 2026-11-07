@@ -6,6 +6,11 @@ import { renderTrackMap, renderList, renderLegend, renderText, laneIndex, laneNa
 import { PRESETS, TOKENS, applyTheme, contrastReport, fixContrast } from './theme.js';
 import { logoSvg } from './logo.js';
 import { resolveBoard, syncBoards } from './pinterest.js';
+import { buildList, listAsText } from './grocery.js';
+import { chef, flame, trophy } from './sprites.js';
+import { XP, levelOf, BADGES, checkBadges } from './badges.js';
+import { pixelPhoto } from './photo.js';
+import { VERSION } from './version.js';
 
 // ---------- storage ----------
 const KEY = 'bitrecipe.v1';
@@ -62,6 +67,108 @@ function toast(msg) {
   toastTimer = setTimeout(() => t.remove(), 2600);
 }
 
+// ---------- XP, levels, badges ----------
+db.stats ||= {};
+db.grocery ||= { entries: [], manual: [], checked: {} };
+function award(xp, why) {
+  const before = levelOf(db.xp || 0).level;
+  db.xp = (db.xp || 0) + xp;
+  const after = levelOf(db.xp);
+  if (xp) emit('xp.earned', { xp, why });
+  if (after.level > before) { celebrate('LEVEL UP!', `LV ${after.level} · ${after.title}`, true); emit('level.up', { level: after.level, title: after.title }); }
+  badgeCheck();
+  save();
+}
+function badgeCheck() {
+  for (const b of checkBadges(db)) { celebrate('BADGE UNLOCKED', b.name); emit('badge.unlocked', { badge: b.id, name: b.name }); }
+  save();
+}
+const celebrations = [];
+function celebrate(head, body, big = false) {
+  celebrations.push({ head, body, big });
+  if (celebrations.length === 1) showCelebration();
+}
+function showCelebration() {
+  const c = celebrations[0];
+  if (!c) return;
+  const el = document.createElement('div');
+  el.className = `celebrate${c.big ? ' big' : ''}`;
+  el.innerHTML = `${trophy(c.big ? 64 : 28)}<div><b class="px">${esc(c.head)}</b><span>${esc(c.body)}</span></div>`;
+  document.body.append(el);
+  if (c.big) confetti();
+  setTimeout(() => { el.classList.add('out'); setTimeout(() => { el.remove(); celebrations.shift(); showCelebration(); }, 350); }, c.big ? 2600 : 2200);
+}
+function levelBar() {
+  const L = levelOf(db.xp || 0);
+  const pct = Math.round((L.into / L.need) * 100);
+  const got = Object.keys(db.badges || {}).length;
+  return `<button class="panel lvl" data-go="#/badges"><div class="row" style="justify-content:space-between"><span class="px lvtag">LV ${L.level}</span><b class="grow">${esc(L.title)}</b><span class="small muted">${trophy(16)} ${got}/${BADGES.length}</span></div>
+    <div class="xpbar"><i style="width:${pct}%"></i></div><span class="small muted">${L.into}/${L.need} XP to next level · ${db.xp || 0} total</span></button>`;
+}
+
+// Pixel photos: made once from the recipe's image link, stored inline (a few KB).
+const photoQueue = new Set();
+async function ensurePhoto(r) {
+  if (!r || r.photo || !r.image || photoQueue.has(r.id) || r.photoFailed) return;
+  photoQueue.add(r.id);
+  const data = await pixelPhoto(r.image);
+  photoQueue.delete(r.id);
+  const live = byId(r.id);
+  if (!live) return;
+  if (data) live.photo = data; else live.photoFailed = true;
+  save();
+  if (data && (location.hash === '' || location.hash === '#/' || location.hash === '#/r/' + r.id)) rerender();
+}
+const photoTag = (r, cls) => r.photo ? `<img class="${cls}" src="${r.photo}" alt="">` : '';
+
+// Share text out (native share sheet, else clipboard, else a copy box).
+async function shareOut(text, title) {
+  if (BitNative) { try { await BitNative.shareText({ text, title }); return; } catch { /* fall through */ } }
+  try { await navigator.clipboard.writeText(text); toast('Copied — paste it anywhere'); return; } catch { /* fall through */ }
+  const box = document.createElement('div');
+  box.className = 'cook';
+  box.innerHTML = `<div class="bar"><button class="icon-btn" aria-label="Close">✕</button><span class="px small">COPY THIS</span></div><textarea class="field" style="flex:1;margin-top:12px">${esc(text)}</textarea>`;
+  box.querySelector('button').onclick = () => box.remove();
+  document.body.append(box);
+  box.querySelector('textarea').select();
+}
+
+function importReport(r) {
+  return [
+    `bitrecipe import report · v${VERSION}`,
+    `Title: ${r.title}`,
+    `Source: ${r.source?.platform || 'text'} ${r.source?.url || ''} ${r.source?.creator ? '(' + r.source.creator + ')' : ''}`,
+    r.importDebug?.input ? `\n--- What was shared/pasted ---\n${r.importDebug.input}` : '',
+    `\n--- Ingredient lines found ---\n${(r.importDebug?.ingredientLines || []).join('\n') || '(none)'}`,
+    `\n--- Step lines found ---\n${(r.importDebug?.stepLines || []).join('\n') || '(none)'}`,
+    `\n--- What bitrecipe made ---`,
+    `Tracks: ${r.lanes.map((l) => l.id + '=' + l.name).join(', ')}`,
+    ...r.ingredients.map((i) => `• ${i.qty ?? '??'}${i.qty2 ? '-' + i.qty2 : ''} ${i.unit || ''} | ${i.item}${i.prep ? ' | ' + i.prep : ''}${i.loose ? ' | ' + i.loose : ''}`),
+    ...r.steps.map((st, k) => `${k + 1}. [${st.lane}${st.merges?.length ? ' ⤵' + st.merges.join('') : ''}]${st.timer ? ' ⏱' + st.timer.min + 'm' : ''} ${st.text}`),
+    `\n--- What went wrong (write here) ---\n`,
+  ].filter(Boolean).join('\n');
+}
+
+// ---------- updates ----------
+const newer = (a, b) => { const x = a.split('.').map(Number), y = b.split('.').map(Number); for (let i = 0; i < 3; i++) { if ((x[i] || 0) !== (y[i] || 0)) return (x[i] || 0) > (y[i] || 0); } return false; };
+async function checkUpdate(manual = false) {
+  if (VERSION === 'dev' && !manual) return;
+  try {
+    const res = await fetch('https://api.github.com/repos/Hootywhooo86/bitrecipe/releases/latest', { headers: { Accept: 'application/vnd.github+json' } });
+    const rel = await res.json();
+    const latest = (rel.tag_name || '').replace(/^v/, '');
+    const apk = rel.assets?.find((a) => a.name.endsWith('.apk'))?.browser_download_url;
+    session.update = latest && apk && (VERSION === 'dev' || newer(latest, VERSION)) ? { version: latest, url: apk } : null;
+    db.prefs.updateChecked = Date.now(); save();
+    if (manual) toast(session.update ? `v${latest} is ready to download` : 'You have the newest version');
+  } catch { if (manual) toast('Couldn’t check for updates'); }
+  if (['', '#/', '#/settings'].includes(location.hash)) rerender();
+}
+function openExternal(url) {
+  if (BitNative) return BitNative.openUrl({ url }).catch(() => toast('Couldn’t open that link'));
+  window.open(url, '_blank', 'noopener');
+}
+
 const srcBadge = (s) => `${s?.via === 'pinterest' ? '<span class="src pinterest">PIN</span>' : ''}<span class="src ${esc(s?.platform || 'text')}">${{ tiktok: 'TIKTOK', instagram: 'REELS', web: 'WEB', youtube: 'YT', text: 'TEXT' }[s?.platform] || 'TEXT'}</span>`;
 
 // ---------- screens ----------
@@ -72,9 +179,12 @@ function libraryView() {
   <header class="top">
     <div class="brand">${logoSvg({ size: 36 })}<span class="word">bit<i>recipe</i></span></div>
     ${session.syncing ? '<span class="pill sync">⟳ PINTEREST</span>' : ''}
+    <button class="icon-btn cartbtn" data-go="#/list" aria-label="Grocery list">🛒${db.grocery.entries.length + db.grocery.manual.length ? `<i>${db.grocery.entries.length + db.grocery.manual.length}</i>` : ''}</button>
     <button class="icon-btn" data-go="#/settings" aria-label="Settings">⚙</button>
   </header>
   <main>
+    ${session.update ? `<div class="flag good updbar"><b>v${esc(session.update.version)} is out!</b> <button class="btn good" data-update>⬇ UPDATE</button></div>` : ''}
+    ${levelBar()}
     <div class="panel">
       <div class="h">▶ NEW QUEST</div>
       <p class="small muted" style="margin-bottom:12px">Share a TikTok, Reel or recipe page to bitrecipe — or paste it here.</p>
@@ -86,7 +196,7 @@ function libraryView() {
     <div class="h">COOKBOOK · ${db.recipes.length}</div>
     ${list.length ? list.map((r) => `
       <div class="panel rcard" data-open="${esc(r.id)}">
-        <div class="strip"></div>
+        ${r.photo ? photoTag(r, 'thumb') : '<div class="strip"></div>'}
         <div class="body">
           <h3>${esc(r.title)}</h3>
           <div class="meta">${srcBadge(r.source)}
@@ -98,8 +208,9 @@ function libraryView() {
             ${r.needsReview ? '<span class="pill newpill">NEW · check me</span>' : ''}
           </div>
         </div>
+        <button class="cardcart${db.grocery.entries.some((e) => e.rid === r.id) ? ' on' : ''}" data-cart="${esc(r.id)}" aria-label="Add to grocery list">${db.grocery.entries.some((e) => e.rid === r.id) ? '✓' : '🛒'}</button>
       </div>`).join('') : '<div class="empty">Nothing here yet.</div>'}
-    <p class="small muted" style="text-align:center;margin-top:20px">${db.xp ? `★ ${db.xp} XP earned in the kitchen` : 'Cook a recipe to earn XP for 128bitlife'}</p>
+    <p class="small muted" style="text-align:center;margin-top:20px">🛒 tap the cart on a recipe to add it to your grocery list</p>
   </main>`;
 }
 
@@ -155,6 +266,7 @@ function reviewView() {
   <header class="top"><button class="icon-btn" data-back aria-label="Back">◀</button><div class="title">CHECK IT</div></header>
   <main>
     ${session.flags.map((f) => `<div class="flag ${f.level}">${esc(f.text)}</div>`).join('')}
+    ${d.image ? `<p class="hint" style="margin-bottom:10px">📷 Photo found — it gets a pixel makeover when you save.</p>` : ''}
     <div class="panel">
       <label class="lbl">Title</label><input class="field" data-f="title" value="${esc(d.title)}">
       <div class="row">
@@ -193,6 +305,7 @@ function reviewView() {
         </div>`).join('')}
       <button class="btn ghost" id="addStep">+ STEP</button>
     </div>
+    ${d.importDebug && !session.editing ? '<button class="btn ghost block" id="report" style="margin-bottom:18px">🐞 SEND THIS IMPORT TO FIX THE IMPORTER</button>' : ''}
     <div class="panel"><div class="h">PREVIEW</div>${renderLegend(d)}${renderTrackMap(finalize(structuredClone(d), true), { factor: 1, system: 'orig' })}</div>
   </main>
   <div class="dock"><div class="inner"><button class="btn good block" id="saveDraft">✓ SAVE RECIPE</button></div></div>`;
@@ -254,6 +367,7 @@ function recipeView(r) {
     <div class="panel">
       <div class="row" style="margin-bottom:8px">${srcBadge(r.source)}<span class="small muted">${esc(r.source?.creator || '')}</span>
         ${r.source?.url ? `<a class="small" href="${esc(r.source.url)}" target="_blank" rel="noopener">open original ↗</a>` : ''}</div>
+      ${r.photo ? `<div class="hero">${photoTag(r, 'heroimg')}</div>` : ''}
       <h1 class="rtitle">${esc(r.title)}</h1>
       <div class="stats">
         <div class="stat"><b>${r.time?.active ? minutesText(r.time.active) : '—'}</b><span>hands-on</span></div>
@@ -283,7 +397,7 @@ function recipeView(r) {
     </div>` : ''}
 
     <div class="panel">
-      <div class="h">INGREDIENTS</div>
+      <div class="row" style="justify-content:space-between;margin-bottom:6px"><div class="h" style="margin:0">INGREDIENTS</div><span class="small muted">tick what you have</span></div>
       <ul class="checklist">${r.ingredients.map((i) => {
         const a = amountText(i, ctx.factor, sys);
         const on = have.has(i.id);
@@ -292,6 +406,7 @@ function recipeView(r) {
           ${a == null ? `<span class="ingnote">${esc(i.note || 'No amount in the source')}${i.suggest ? ` · <span class="sug">suggested: ${esc(amountText({ ...i, ...i.suggest, missing: false }, ctx.factor, sys))}</span>` : ''}</span>` : ''}
         </span></li>`;
       }).join('')}</ul>
+      <button class="btn alt block" id="toList" style="margin-top:12px">🛒 ${db.grocery.entries.some((e) => e.rid === r.id) ? 'UPDATE LIST' : 'ADD MISSING TO LIST'}${have.size ? ` · ${r.ingredients.filter((i) => !have.has(i.id)).length} ITEMS` : ''}</button>
     </div>
 
     <div class="panel">
@@ -311,6 +426,7 @@ function recipeView(r) {
       <button class="btn ghost grow" id="dup">⧉ MY VERSION</button>
       <button class="btn ghost" id="del" aria-label="Delete">🗑</button>
     </div>
+    ${r.importDebug ? '<button class="btn ghost block" id="report" style="margin-top:12px">🐞 THIS IMPORT WENT WRONG</button>' : ''}
   </main>
   <div class="dock"><div class="inner"><button class="btn block" id="cook">▶ COOK MODE</button></div></div>`;
 }
@@ -354,6 +470,18 @@ function settingsView() {
       <div class="setrow" style="margin-top:10px"><div class="grow"><b>Animations</b><span class="small muted">Steam, bubbling timers, confetti and wipes.</span></div>
         <div class="seg-ctl" style="width:150px"><button data-motion="1" class="${db.prefs.motion !== false ? 'on' : ''}">ON</button><button data-motion="0" class="${db.prefs.motion === false ? 'on' : ''}">CALM</button></div></div>
     </div>
+    <div class="panel">
+      <div class="h">💾 BACKUP</div>
+      <p class="small muted" style="margin-bottom:10px">Save everything (recipes, photos, grocery list, XP, boards, colours) to a file, or load one back. Restoring adds to what's here and never deletes.</p>
+      <div class="row"><button class="btn ghost grow" id="backup">⬇ SAVE BACKUP</button><label class="btn ghost grow" style="text-align:center">⬆ RESTORE<input type="file" id="restore" accept="application/json,.json" hidden></label></div>
+    </div>
+
+    <div class="panel">
+      <div class="h">ABOUT</div>
+      <div class="setrow"><div class="grow"><b>bitrecipe v${esc(VERSION)}</b><span class="small muted">${session.update ? `v${esc(session.update.version)} is available` : 'Checks GitHub Releases for new builds'}</span></div>
+        ${session.update ? '<button class="btn good" data-update>⬇ UPDATE</button>' : '<button class="btn ghost" id="checkUpd">CHECK</button>'}</div>
+      <button class="btn ghost block" data-go="#/badges" style="margin-top:10px">${trophy(14)} BADGES & LEVEL</button>
+    </div>
     <p class="small muted" style="text-align:center">★ ${db.xp || 0} XP · ${db.recipes.length} recipes</p>
   </main>`;
 }
@@ -374,7 +502,7 @@ async function runPinterestSync(manual = false) {
   if (['', '#/', '#/settings'].includes(location.hash)) rerender();
   try {
     const { added } = await syncBoards(boards, {
-      saveRecipe: (rec) => { db.recipes.unshift(rec); emit('recipe.saved', { recipeId: rec.id, title: rec.title, platform: 'pinterest' }); },
+      saveRecipe: (rec) => { db.recipes.unshift(rec); emit('recipe.saved', { recipeId: rec.id, title: rec.title, platform: 'pinterest' }); award(XP.save, 'saved'); ensurePhoto(rec); },
       isKnownUrl: (u) => db.recipes.some((r) => r.source?.url === u),
     });
     save();
@@ -383,6 +511,43 @@ async function runPinterestSync(manual = false) {
   } catch { if (manual) toast('Couldn’t reach Pinterest'); }
   session.syncing = false;
   if (['', '#/', '#/settings'].includes(location.hash)) rerender();
+}
+
+function listView() {
+  const g = db.grocery;
+  const sections = buildList(db.recipes, g.entries, g.manual, db.prefs.system);
+  const total = sections.reduce((a, s) => a + s.lines.length, 0);
+  const done = sections.reduce((a, s) => a + s.lines.filter((l) => g.checked[l.key]).length, 0);
+  return `
+  <header class="top"><button class="icon-btn" data-back aria-label="Back">◀</button><div class="title">GROCERY LIST</div>${total ? '<button class="icon-btn" id="shareList" aria-label="Share list">⇪</button>' : ''}</header>
+  <main>
+    ${g.entries.length ? `<div class="panel"><div class="h">COOKING</div><div class="chips">${g.entries.map((e) => {
+      const r = byId(e.rid);
+      return r ? `<span class="chip lchip"><a href="#/r/${esc(r.id)}">${esc(r.title)}</a> · ${e.servings} ${esc(r.servingsLabel || 'servings')}${e.skip?.length ? ` · ${e.skip.length} you have` : ''} <button data-unlist="${esc(e.rid)}" aria-label="Remove">✕</button></span>` : '';
+    }).join('')}</div></div>` : `<div class="panel empty">${chef(48)}<p style="margin-top:10px">Your list is empty.<br>Tap 🛒 on recipes you want to cook, and everything you still need lands here, merged and sorted by aisle.</p></div>`}
+    ${total ? `<div class="quest" style="margin-bottom:14px"><i style="width:${Math.round((done / total) * 100)}%"></i></div>` : ''}
+    ${sections.map((sec) => `<div class="panel"><div class="h">${esc(sec.aisle.toUpperCase())}</div><ul class="checklist">${sec.lines.map((l) => `
+      <li data-gcheck="${esc(l.key)}" class="${g.checked[l.key] ? 'on' : ''}"><span class="box">${g.checked[l.key] ? '✓' : ''}</span><span class="txt">
+        ${l.amount ? `<b class="amt${l.missing ? ' missing' : ''}">${esc(l.amount)}</b> ` : ''}${esc(l.item)}<span class="ingnote">${esc(l.from.join(' · '))}</span></span>
+        ${l.manual ? `<button class="x pill" data-unmanual="${esc(l.manual)}">✕</button>` : ''}</li>`).join('')}</ul></div>`).join('')}
+    <div class="panel">
+      <div class="h">+ ADD SOMETHING ELSE</div>
+      <div class="row"><input class="field grow" id="manualItem" placeholder="Paper towels, coffee…"><button class="btn" id="addManual">ADD</button></div>
+    </div>
+    ${total ? `<div class="row"><button class="btn ghost grow" id="clearChecked">CLEAR TICKED</button><button class="btn ghost grow" id="clearList">CLEAR ALL</button></div>` : ''}
+  </main>`;
+}
+
+function badgesView() {
+  const L = levelOf(db.xp || 0);
+  const got = db.badges || {};
+  return `
+  <header class="top"><button class="icon-btn" data-back aria-label="Back">◀</button><div class="title">BADGES</div></header>
+  <main>
+    ${levelBar()}
+    <div class="badges">${BADGES.map((b) => `<div class="badge${got[b.id] ? ' got' : ''}">${trophy(32)}<b>${esc(b.name)}</b><span>${esc(b.desc)}</span></div>`).join('')}</div>
+    <p class="small muted" style="text-align:center;margin-top:16px">XP: cook a recipe +${XP.cook} · save a recipe +${XP.save} · make your own version +${XP.version} · start a grocery list +${XP.grocery}<br>Level ${L.level}: ${esc(L.title)}</p>
+  </main>`;
 }
 
 function themeView() {
@@ -445,7 +610,7 @@ function renderCook() {
     el.innerHTML = `
       <div class="bar"><button class="icon-btn" id="cookClose" aria-label="Close">✕</button><div class="quest"><i style="width:${pct}%"></i></div><span class="px" style="font-size:10px">${c.i + 1}/${r.steps.length}</span></div>
       <div class="stage ${c.dir || ''}">
-        <div class="where"><span class="tag lane-${k}">${esc(s.lane)} · ${esc(laneName(r, s.lane))}</span>${s.wait ? '<span class="pill off">hands-off</span>' : ''}
+        <div class="where"><span class="tag lane-${k}">${esc(s.lane)} · ${esc(laneName(r, s.lane))}</span>${s.wait ? `<span class="pill off">${flame(12)} hands-off</span>` : ''}
           ${(s.merges || []).map((m) => `<span class="pill">⤵ ${esc(laneName(r, m))} joins</span>`).join('')}</div>
         <div class="bigtext">${renderText(s.text, r, ctx)}</div>
         ${s.timer ? `<button class="btn alt" data-timer="${esc(s.id)}">⏱ START ${esc(s.timer.label.toUpperCase())} · ${minutesText(s.timer.min)}</button>` : ''}
@@ -464,7 +629,8 @@ function renderCook() {
       ctx.done.add(r.steps[c.i].id);
       if (c.i < r.steps.length - 1) { c.i++; c.dir = 'fwd'; return renderCook(); }
       r.cooked = (r.cooked || 0) + 1;
-      db.xp = (db.xp || 0) + 50;
+      if (r.lanes.length >= 3) db.stats.threeTrack = (db.stats.threeTrack || 0) + 1;
+      setTimeout(() => award(XP.cook, 'cooked'), 1400);
       emit('recipe.cooked', { recipeId: r.id, title: r.title, xp: 50, cookedCount: r.cooked });
       save();
       c.finished = true;
@@ -518,6 +684,8 @@ async function startTimer(r, stepId) {
   if (timers.some((t) => t.step === stepId && t.end > Date.now() && !t.dismissed)) return toast('That timer is already running');
   const t = { id: Math.random().toString(36).slice(2), nid: Math.floor(Math.random() * 2e9), recipe: r.id, title: r.title, step: stepId, label: s.timer.label, start: Date.now(), end: Date.now() + s.timer.min * 60000, rang: false };
   timers.push(t);
+  db.stats.timers = (db.stats.timers || 0) + 1;
+  badgeCheck();
   saveTimers();
   toast(`⏱ ${s.timer.label} · ${minutesText(s.timer.min)} started`);
   tick();
@@ -575,9 +743,10 @@ async function runImport(input) {
   const text = input.trim();
   if (!text) return toast('Paste a link or some recipe text first');
   const box = document.getElementById('importing');
-  if (box) box.innerHTML = '<div class="loading"><div class="loadbar"><i></i></div><span class="px small">READING</span></div>';
+  if (box) box.innerHTML = `<div class="loading"><div class="runway">${chef(40)}</div><div class="loadbar"><i></i></div><span class="px small">READING</span></div>`;
   try {
     const { recipe, flags } = await importAnything(text);
+    recipe.importDebug = { ...(recipe.importDebug || {}), input: text.slice(0, 6000) };
     session.draft = recipe;
     session.flags = flags;
     session.pendingInput = '';
@@ -607,6 +776,8 @@ function render() {
   if (route === 'add') html = addView();
   else if (route === 'review') html = reviewView();
   else if (route === 'theme') html = themeView();
+  else if (route === 'list') html = listView();
+  else if (route === 'badges') html = badgesView();
   else if (route === 'settings') { html = settingsView(); if (!session.alerts) refreshAlerts(); }
   else if (route === 'r' && byId(arg)) html = recipeView(byId(arg));
   else if (route === 'edit' && byId(arg)) {
@@ -633,7 +804,7 @@ window.addEventListener('hashchange', () => {
   else { document.body.classList.add('enter'); clearTimeout(enterT); enterT = setTimeout(() => document.body.classList.remove('enter'), 900); }
 });
 
-function rerender() { const y = window.scrollY; render(); window.scrollTo(0, y); }
+function rerender() { const y = window.scrollY; document.body.classList.remove("enter"); render(); window.scrollTo(0, y); }
 
 $app.addEventListener('input', (e) => {
   if (e.target.id === 'search') {
@@ -652,7 +823,7 @@ $app.addEventListener('input', (e) => {
 $app.addEventListener('change', (e) => { if (e.target.dataset.color) rerender(); });
 
 $app.addEventListener('click', (e) => {
-  const t = e.target.closest('button, [data-open], [data-have], [data-step], a');
+  const t = e.target.closest('button, [data-open], [data-have], [data-step], [data-gcheck], a');
   if (!t) return;
   const d = t.dataset;
   const [route, arg] = location.hash.replace(/^#\/?/, '').split('/');
@@ -679,13 +850,15 @@ $app.addEventListener('click', (e) => {
     if (t.id === 'addIng') { syncDraft(); dr.ingredients.push({ id: 'i' + Date.now().toString(36), qty: null, unit: '', item: '', raw: '', edited: true }); return rerender(); }
     if (t.id === 'addStep') { syncDraft(); dr.steps.push({ id: 's' + Date.now().toString(36), lane: dr.steps.at(-1)?.lane || dr.lanes[0].id, text: '', merges: [] }); return rerender(); }
     if (t.id === 'addLane') { syncDraft(); const id = ['A', 'B', 'C'].find((l) => !dr.lanes.some((x) => x.id === l)); dr.lanes.push({ id, name: `Track ${id}` }); return rerender(); }
+    if (t.id === 'report') { syncDraft(); return shareOut(importReport(finalize(structuredClone(dr), true)), 'bitrecipe import report'); }
     if (t.id === 'saveDraft') {
       syncDraft();
       const rec = finalize(structuredClone(dr));
       rec.ingredients.forEach((i) => { delete i.edited; });
       delete rec.needsReview; delete rec.reviewFlags;
       const idx = db.recipes.findIndex((x) => x.id === rec.id);
-      if (idx >= 0) db.recipes[idx] = rec; else { db.recipes.unshift(rec); emit('recipe.saved', { recipeId: rec.id, title: rec.title, platform: rec.source?.platform }); }
+      if (idx >= 0) db.recipes[idx] = rec; else { db.recipes.unshift(rec); emit('recipe.saved', { recipeId: rec.id, title: rec.title, platform: rec.source?.platform }); setTimeout(() => award(XP.save, 'saved'), 600); }
+      ensurePhoto(rec);
       if (!session.editing) emit('recipe.scraped', { recipeId: rec.id, platform: rec.source?.platform });
       save();
       session.draft = null; session.editing = null;
@@ -707,12 +880,15 @@ $app.addEventListener('click', (e) => {
     if (d.have) { const h = (session.have[r.id] ||= new Set()); h.has(d.have) ? h.delete(d.have) : h.add(d.have); return rerender(); }
     if (d.step && !e.target.closest('a')) { const s = ctxFor(r).done; s.has(d.step) ? s.delete(d.step) : s.add(d.step); return rerender(); }
     if (t.id === 'cook') return openCook(r);
+    if (t.id === 'toList') { addToList(r, [...(session.have[r.id] || [])].filter((k) => !k.startsWith('prep-')), ctxFor(r).servings); save(); return rerender(); }
+    if (t.id === 'report') return shareOut(importReport(r), 'bitrecipe import report');
     if (t.id === 'looksGood') { delete r.needsReview; delete r.reviewFlags; save(); toast('Saved for good'); return rerender(); }
     if (t.id === 'dup') {
       const copy = structuredClone(r);
       copy.id = 'r' + Date.now().toString(36);
       copy.title = `${r.title} (my version)`;
-      copy.parent = r.id; copy.cooked = 0; delete copy.sample;
+      copy.parent = r.id; copy.cooked = 0; delete copy.sample; delete copy.importDebug;
+      setTimeout(() => award(XP.version, 'version'), 600);
       db.recipes.unshift(copy); save();
       toast('Copy made — edit away, the original stays as it was');
       return go('#/edit/' + copy.id);
@@ -722,6 +898,45 @@ $app.addEventListener('click', (e) => {
       db.recipes = db.recipes.filter((x) => x.id !== r.id); save();
       return location.replace('#/');
     }
+  }
+
+  // anywhere
+  if (d.update != null && session.update) return openExternal(session.update.url);
+  if (d.cart) {
+    e.stopPropagation();
+    const rr = byId(d.cart);
+    const g = db.grocery;
+    if (g.entries.some((x) => x.rid === rr.id)) { g.entries = g.entries.filter((x) => x.rid !== rr.id); toast('Removed from the list'); }
+    else addToList(rr, []);
+    save(); return rerender();
+  }
+  if (t.tagName === 'A' && /^https?:/.test(t.getAttribute('href') || '') && BitNative) { e.preventDefault(); return openExternal(t.href); }
+
+  // grocery list
+  if (route === 'list') {
+    const g = db.grocery;
+    if (d.gcheck) { g.checked[d.gcheck] = !g.checked[d.gcheck]; save(); return rerender(); }
+    if (d.unlist) { g.entries = g.entries.filter((x) => x.rid !== d.unlist); save(); return rerender(); }
+    if (d.unmanual) { g.manual = g.manual.filter((x) => x.id !== d.unmanual); save(); return rerender(); }
+    if (t.id === 'addManual') {
+      const v = document.getElementById('manualItem').value.trim();
+      if (!v) return;
+      g.manual.push({ id: Date.now().toString(36), text: v }); save(); return rerender();
+    }
+    if (t.id === 'clearChecked') {
+      const secs = buildList(db.recipes, g.entries, g.manual, db.prefs.system);
+      const keys = secs.flatMap((s) => s.lines).filter((l) => g.checked[l.key]);
+      g.manual = g.manual.filter((m) => !g.checked['m:' + m.id]);
+      // a recipe whose lines are all ticked is done shopping: drop it
+      g.entries = g.entries.filter((en) => {
+        const r = byId(en.rid);
+        return r && secs.flatMap((s) => s.lines).some((l) => !g.checked[l.key] && l.from.includes(r.title));
+      });
+      keys.forEach((l) => delete g.checked[l.key]);
+      save(); return rerender();
+    }
+    if (t.id === 'clearList') { if (!confirm('Clear the whole list?')) return; db.grocery = { entries: [], manual: [], checked: {} }; save(); return rerender(); }
+    if (t.id === 'shareList') return shareOut(listAsText(buildList(db.recipes, g.entries, g.manual, db.prefs.system), g.checked), 'Grocery list');
   }
 
   // settings screen
@@ -749,6 +964,8 @@ $app.addEventListener('click', (e) => {
   }
   if (d.unboard != null) { db.pinterest.boards.splice(+d.unboard, 1); save(); return rerender(); }
   if (t.id === 'syncNow') return runPinterestSync(true);
+  if (t.id === 'checkUpd') return checkUpdate(true);
+  if (t.id === 'backup') return saveBackup();
   if (d.motion) { db.prefs.motion = d.motion === '1'; save(); setMotion(); return rerender(); }
 
   // theme screen
@@ -775,6 +992,58 @@ document.addEventListener('keydown', (e) => {
   if (e.key === 'Escape') document.getElementById('cookClose')?.click();
 });
 
+function addToList(r, skip = [], servings) {
+  const g = db.grocery;
+  const first = !g.entries.length && !g.manual.length;
+  const entry = { rid: r.id, servings: servings || r.servings, skip };
+  const i = g.entries.findIndex((x) => x.rid === r.id);
+  if (i >= 0) g.entries[i] = entry; else g.entries.push(entry);
+  const n = r.ingredients.length - skip.length;
+  toast(`🛒 ${n} item${n === 1 ? '' : 's'} for ${r.title}${skip.length ? ` (skipped ${skip.length} you have)` : ''}`);
+  if (first) { db.stats.lists = (db.stats.lists || 0) + 1; award(XP.grocery, 'grocery'); }
+  bumpCart();
+}
+function bumpCart() {
+  const b = document.querySelector('.cartbtn');
+  b?.classList.remove('bump'); void b?.offsetWidth; b?.classList.add('bump');
+}
+
+async function saveBackup() {
+  const data = JSON.stringify({ app: 'bitrecipe', version: VERSION, exported: new Date().toISOString(), db }, null, 1);
+  const name = `bitrecipe-backup-${new Date().toISOString().slice(0, 10)}.json`;
+  if (BitNative) {
+    try { await BitNative.saveFile({ name, text: data, mime: 'application/json' }); toast('Backup saved'); } catch (e) { if (!/cancel/i.test(e?.message || '')) toast('Couldn’t save the backup'); }
+    return;
+  }
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(new Blob([data], { type: 'application/json' }));
+  a.download = name; a.click();
+  setTimeout(() => URL.revokeObjectURL(a.href), 2000);
+  toast('Backup downloaded');
+}
+$app.addEventListener('change', async (e) => {
+  if (e.target.id !== 'restore' || !e.target.files?.[0]) return;
+  try {
+    const parsed = JSON.parse(await e.target.files[0].text());
+    const b = parsed.db || parsed;
+    if (!Array.isArray(b.recipes)) throw new Error('not a bitrecipe backup');
+    let added = 0, updated = 0;
+    for (const r of b.recipes) {
+      const i = db.recipes.findIndex((x) => x.id === r.id);
+      if (i < 0) { db.recipes.push(r); added++; } else if ((r.cooked || 0) >= (db.recipes[i].cooked || 0)) { db.recipes[i] = r; updated++; }
+    }
+    db.xp = Math.max(db.xp || 0, b.xp || 0);
+    db.badges = { ...(b.badges || {}), ...(db.badges || {}) };
+    db.stats = { ...(b.stats || {}), ...db.stats };
+    if (b.grocery && !db.grocery.entries.length && !db.grocery.manual.length) db.grocery = b.grocery;
+    if (b.pinterest?.boards?.length) { db.pinterest ||= { boards: [] }; for (const bd of b.pinterest.boards) if (!db.pinterest.boards.some((x) => x.feed === bd.feed)) db.pinterest.boards.push(bd); }
+    if (b.theme && confirm('Use the colours from the backup too?')) { db.theme = b.theme; paint(theme()); }
+    save();
+    toast(`Restored: ${added} new, ${updated} updated`);
+    rerender();
+  } catch (err) { toast('That file isn’t a bitrecipe backup'); }
+});
+
 function setMotion() {
   const calm = db.prefs.motion === false || matchMedia('(prefers-reduced-motion: reduce)').matches;
   document.documentElement.classList.toggle('calm', calm);
@@ -789,5 +1058,8 @@ document.addEventListener('visibilitychange', () => {
   if (Date.now() - last > 15 * 60000) runPinterestSync();
 });
 setTimeout(() => runPinterestSync(), 1500);
+if (Date.now() - (db.prefs.updateChecked || 0) > 6 * 3600000) setTimeout(() => checkUpdate(), 2500);
+// make pixel photos for any recipe that has an image but no photo yet
+setTimeout(() => db.recipes.filter((r) => r.image && !r.photo && !r.photoFailed).slice(0, 6).forEach(ensurePhoto), 3000);
 
 render();

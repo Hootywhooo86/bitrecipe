@@ -1,6 +1,7 @@
 package com.bit128.bitrecipe;
 
 import android.Manifest;
+import android.app.Activity;
 import android.app.AlarmManager;
 import android.app.NotificationManager;
 import android.app.PendingIntent;
@@ -11,7 +12,10 @@ import android.net.Uri;
 import android.os.Build;
 import android.provider.Settings;
 import android.view.Window;
+import java.io.OutputStream;
+import java.nio.charset.StandardCharsets;
 import android.view.WindowManager;
+import androidx.activity.result.ActivityResult;
 import androidx.core.view.WindowCompat;
 import androidx.core.view.WindowInsetsControllerCompat;
 import com.getcapacitor.JSObject;
@@ -19,6 +23,7 @@ import com.getcapacitor.Plugin;
 import com.getcapacitor.PluginCall;
 import com.getcapacitor.PermissionState;
 import com.getcapacitor.PluginMethod;
+import com.getcapacitor.annotation.ActivityCallback;
 import com.getcapacitor.annotation.CapacitorPlugin;
 import com.getcapacitor.annotation.Permission;
 import com.getcapacitor.annotation.PermissionCallback;
@@ -196,5 +201,57 @@ public class BitNativePlugin extends Plugin {
         am.cancel(TimerReceiver.fireIntent(ctx, id, "", ""));
         ((NotificationManager) ctx.getSystemService(Context.NOTIFICATION_SERVICE)).cancel(id);
         call.resolve();
+    }
+
+    // ---------- sharing, links, files ----------
+
+    @PluginMethod
+    public void shareText(PluginCall call) {
+        Intent send = new Intent(Intent.ACTION_SEND);
+        send.setType("text/plain");
+        send.putExtra(Intent.EXTRA_TEXT, call.getString("text", ""));
+        send.putExtra(Intent.EXTRA_SUBJECT, call.getString("title", "bitrecipe"));
+        Intent chooser = Intent.createChooser(send, call.getString("title", "Share"));
+        chooser.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
+        getContext().startActivity(chooser);
+        call.resolve();
+    }
+
+    @PluginMethod
+    public void openUrl(PluginCall call) {
+        String url = call.getString("url");
+        if (url == null) { call.reject("url is required"); return; }
+        Intent i = new Intent(Intent.ACTION_VIEW, Uri.parse(url));
+        i.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
+        try {
+            getContext().startActivity(i);
+            call.resolve();
+        } catch (Exception e) {
+            call.reject("No app can open that link");
+        }
+    }
+
+    @PluginMethod
+    public void saveFile(PluginCall call) {
+        Intent i = new Intent(Intent.ACTION_CREATE_DOCUMENT);
+        i.addCategory(Intent.CATEGORY_OPENABLE);
+        i.setType(call.getString("mime", "application/json"));
+        i.putExtra(Intent.EXTRA_TITLE, call.getString("name", "bitrecipe-backup.json"));
+        startActivityForResult(call, i, "saveFileResult");
+    }
+
+    @ActivityCallback
+    private void saveFileResult(PluginCall call, ActivityResult result) {
+        if (call == null) return;
+        if (result.getResultCode() != Activity.RESULT_OK || result.getData() == null || result.getData().getData() == null) {
+            call.reject("cancelled");
+            return;
+        }
+        try (OutputStream os = getContext().getContentResolver().openOutputStream(result.getData().getData())) {
+            os.write(call.getString("text", "").getBytes(StandardCharsets.UTF_8));
+            call.resolve();
+        } catch (Exception e) {
+            call.reject("Could not save: " + e.getMessage());
+        }
     }
 }

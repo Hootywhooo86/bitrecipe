@@ -318,7 +318,7 @@ export function markersToTokens(text, ingredients) {
 
 // ---------- assembling a draft ----------
 
-export function buildDraft({ title, ingredientLines, stepLines, servings, source, flags = [], totalTime, activeTime }) {
+export function buildDraft({ title, ingredientLines, stepLines, servings, source, flags = [], totalTime, activeTime, image }) {
   const ingredients = ingredientLines.map(parseIngredientLine).filter(Boolean);
   const { lanes, steps } = guessLanes(stepLines, ingredients);
   linkSteps(ingredients, steps);
@@ -344,6 +344,8 @@ export function buildDraft({ title, ingredientLines, stepLines, servings, source
       steps,
       cooked: 0,
       created: Date.now(),
+      image: image || null,
+      importDebug: { ingredientLines: ingredientLines.slice(0, 80), stepLines: stepLines.map((x) => x.text).slice(0, 60) },
     },
     flags: fl,
   };
@@ -393,6 +395,13 @@ function instructionsOf(ri) {
   return out;
 }
 
+function imageOf(img) {
+  if (!img) return null;
+  if (typeof img === 'string') return img;
+  if (Array.isArray(img)) return imageOf(img[0]);
+  return img.url || img.contentUrl || null;
+}
+
 function metaContent(doc, prop) {
   const el = doc.querySelector(`meta[property="${prop}"], meta[name="${prop}"]`);
   return el ? el.getAttribute('content') : null;
@@ -421,7 +430,7 @@ export async function importUrl(url) {
     const parsed = parseText(caption);
     const flags = [{ level: 'info', text: `Read the ${platform === 'tiktok' ? 'TikTok caption' : 'video title'} only. Spoken steps and on-screen text are not read yet — check against the video.` }];
     if (caption.length < 60) flags.push({ level: 'bad', text: 'The caption is very short, so the recipe is probably only in the video. Paste the steps as text, or check the creator’s link in bio.' });
-    return buildDraft({ ...parsed, title: parsed.title || caption.split(/[.!#\n]/)[0].slice(0, 70), source, flags });
+    return buildDraft({ ...parsed, title: parsed.title || caption.split(/[.!#\n]/)[0].slice(0, 70), source, flags, image: data.thumbnail_url });
   }
   const html = await getText(url);
   const doc = new DOMParser().parseFromString(html, 'text/html');
@@ -443,6 +452,7 @@ export async function importUrl(url) {
         totalTime: isoMinutes(r.totalTime),
         activeTime: isoMinutes(r.prepTime) && isoMinutes(r.cookTime) ? null : isoMinutes(r.prepTime),
         source,
+        image: imageOf(r.image) || metaContent(doc, 'og:image'),
         flags: [{ level: 'good', text: 'Found the recipe card data on this page.' }],
       });
     }
@@ -460,7 +470,7 @@ export async function importUrl(url) {
   }
   const parsed = parseText(caption);
   const flags = [{ level: platform === 'instagram' ? 'info' : 'warn', text: platform === 'instagram' ? 'Read the post caption only. Instagram often hides the full caption from apps — if things are missing, paste it as text.' : 'This page has no recipe card data, so this came from its description. Check it carefully, or paste the text.' }];
-  return buildDraft({ ...parsed, title: parsed.title || decode(metaContent(doc, 'og:title') || doc.title || ''), source, flags });
+  return buildDraft({ ...parsed, title: parsed.title || decode(metaContent(doc, 'og:title') || doc.title || ''), source, flags, image: metaContent(doc, 'og:image') });
 }
 
 export function importText(text) {
