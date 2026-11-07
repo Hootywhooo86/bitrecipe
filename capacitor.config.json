@@ -1,0 +1,13 @@
+{
+  "appId": "com.bit128.bitrecipe",
+  "appName": "bitrecipe",
+  "webDir": "app",
+  "backgroundColor": "#0b0b16",
+  "android": {
+    "allowMixedContent": false
+  },
+  "plugins": {
+    "CapacitorHttp": { "enabled": true },
+    "SplashScreen": { "launchShowDuration": 0 }
+  }
+}

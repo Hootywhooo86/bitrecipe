@@ -1,0 +1,21 @@
+{
+  "name": "bitrecipe",
+  "version": "0.1.0",
+  "private": true,
+  "description": "bitrecipe: messy recipe videos and pages in, chunky pixel recipe cards out. Android app (Capacitor).",
+  "scripts": {
+    "serve": "npx --yes http-server app -p 8080 -c-1",
+    "icons": "node scripts/make-icons.mjs",
+    "android:setup": "bash scripts/android-setup.sh",
+    "android:build": "bash scripts/android-setup.sh && cd android && ./gradlew assembleDebug"
+  },
+  "dependencies": {
+    "@capacitor/android": "6.2.0",
+    "@capacitor/core": "6.2.0"
+  },
+  "devDependencies": {
+    "@capacitor/assets": "3.0.5",
+    "@capacitor/cli": "6.2.0"
+  },
+  "type": "module"
+}

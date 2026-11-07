@@ -4,6 +4,7 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>bitrecipe — Recipes, but chunkier.</title>
+<link rel="icon" href="app/logo.svg" type="image/svg+xml">
 <meta name="description" content="bitrecipe is the 128bit family's pixel recipe scraper: paste any recipe link, get a clean readable card — ingredients, steps, no life story. Coming soon.">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -26,7 +27,7 @@
   .wrap{max-width:960px;margin:0 auto;padding:0 20px;position:relative;z-index:1}
   nav{display:flex;justify-content:space-between;align-items:center;padding:22px 0}
   .logo{display:flex;align-items:center;gap:12px;font-family:'Press Start 2P',monospace;font-size:15px}
-  .logo-mark{width:34px;height:34px;background:var(--tomato);display:grid;place-items:center;font-size:18px;box-shadow:0 4px 0 var(--tomato-deep), 4px 0 0 var(--tomato-deep), -4px 0 0 var(--tomato-deep), 0 -4px 0 var(--tomato-deep);image-rendering:pixelated}
+  .logo-mark{width:40px;height:40px;image-rendering:pixelated}
   .badge{font-family:'Press Start 2P',monospace;font-size:9px;color:var(--bg);background:var(--yellow);padding:8px 10px;letter-spacing:1px;box-shadow:0 4px 0 #a16207}
   header{text-align:center;padding:52px 0 30px}
   .eyebrow{font-family:'Press Start 2P',monospace;font-size:10px;color:var(--tomato);letter-spacing:2px;margin-bottom:26px}
@@ -87,7 +88,7 @@
 <body>
 <div class="wrap">
   <nav>
-    <div class="logo"><span class="logo-mark">🍳</span> bitrecipe</div>
+    <div class="logo"><img class="logo-mark" src="app/logo.svg" alt=""> bitrecipe</div>
     <span class="badge">COMING SOON</span>
   </nav>
 
