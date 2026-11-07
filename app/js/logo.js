@@ -43,7 +43,8 @@ export function logoSvg({ size = 64, themed = true, bg = null, pad = 0 } = {}) {
       if (ch === '.') return;
       const [token, fallback] = LOGO_TOKENS[ch];
       const fill = themed ? `style="fill:var(${token},${fallback})"` : `fill="${fallback}"`;
-      rects += `<rect x="${x + pad}" y="${y + pad}" width="1.02" height="1.02" ${fill}/>`;
+      const steam = 'YAB'.includes(ch) ? ` class="st st${ch}"` : '';
+      rects += `<rect${steam} x="${x + pad}" y="${y + pad}" width="1.02" height="1.02" ${fill}/>`;
     });
   });
   const back = bg ? `<rect width="${n}" height="${n}" fill="${bg}"/>` : '';

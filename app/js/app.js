@@ -5,6 +5,7 @@ import { amountText, itemText, minutesText } from './units.js';
 import { renderTrackMap, renderList, renderLegend, renderText, laneIndex, laneName, maxParallel, esc } from './trackmap.js';
 import { PRESETS, TOKENS, applyTheme, contrastReport, fixContrast } from './theme.js';
 import { logoSvg } from './logo.js';
+import { resolveBoard, syncBoards } from './pinterest.js';
 
 // ---------- storage ----------
 const KEY = 'bitrecipe.v1';
@@ -61,7 +62,7 @@ function toast(msg) {
   toastTimer = setTimeout(() => t.remove(), 2600);
 }
 
-const srcBadge = (s) => `<span class="src ${esc(s?.platform || 'text')}">${{ tiktok: 'TIKTOK', instagram: 'REELS', web: 'WEB', youtube: 'YT', text: 'TEXT' }[s?.platform] || 'TEXT'}</span>`;
+const srcBadge = (s) => `${s?.via === 'pinterest' ? '<span class="src pinterest">PIN</span>' : ''}<span class="src ${esc(s?.platform || 'text')}">${{ tiktok: 'TIKTOK', instagram: 'REELS', web: 'WEB', youtube: 'YT', text: 'TEXT' }[s?.platform] || 'TEXT'}</span>`;
 
 // ---------- screens ----------
 function libraryView() {
@@ -70,7 +71,8 @@ function libraryView() {
   return `
   <header class="top">
     <div class="brand">${logoSvg({ size: 36 })}<span class="word">bit<i>recipe</i></span></div>
-    <button class="icon-btn" data-go="#/theme" aria-label="Colours">🎨</button>
+    ${session.syncing ? '<span class="pill sync">⟳ PINTEREST</span>' : ''}
+    <button class="icon-btn" data-go="#/settings" aria-label="Settings">⚙</button>
   </header>
   <main>
     <div class="panel">
@@ -93,6 +95,7 @@ function libraryView() {
             <span>${r.ingredients.length} items</span>
             ${r.ingredients.some((i) => i.missing && i.qty == null) ? '<span style="color:var(--accent)">?? missing</span>' : ''}
             ${r.cooked ? `<span>★ ${r.cooked}</span>` : ''}
+            ${r.needsReview ? '<span class="pill newpill">NEW · check me</span>' : ''}
           </div>
         </div>
       </div>`).join('') : '<div class="empty">Nothing here yet.</div>'}
@@ -266,6 +269,11 @@ function recipeView(r) {
       </div>
     </div>
 
+    ${r.needsReview ? `<div class="panel newbox">
+      <div class="h">📌 NEW FROM PINTEREST${r.source?.board ? ' · ' + esc(r.source.board).toUpperCase() : ''}</div>
+      ${(r.reviewFlags || []).map((f) => `<div class="flag ${f.level}">${esc(f.text)}</div>`).join('')}
+      <div class="row"><button class="btn good grow" id="looksGood">✓ LOOKS GOOD</button><button class="btn ghost grow" data-go="#/edit/${esc(r.id)}">✎ FIX IT</button></div>
+    </div>` : ''}
     ${missing.length ? `<div class="flag warn">?? ${missing.length} amount${missing.length > 1 ? 's' : ''} missing from the source: ${missing.map((i) => esc(i.item)).join(', ')}. <a href="#/edit/${esc(r.id)}">Fill in</a></div>` : ''}
 
     ${r.equipment?.length || prepList.length ? `<div class="panel">
@@ -308,6 +316,74 @@ function recipeView(r) {
 }
 
 const cap = (s) => s ? s[0].toUpperCase() + s.slice(1) : s;
+
+function settingsView() {
+  const st = session.alerts;
+  const row = (ok, label, help, btn) => `<div class="setrow"><div class="grow"><b>${label}</b><span class="small muted">${help}</span></div>${ok ? '<span class="okmark">✓ ON</span>' : btn}</div>`;
+  const boards = db.pinterest?.boards || [];
+  return `
+  <header class="top"><button class="icon-btn" data-back aria-label="Back">◀</button><div class="title">SETTINGS</div></header>
+  <main>
+    <div class="panel">
+      <div class="h">⏱ TIMER ALERTS</div>
+      ${!BitNative ? '<p class="small muted">Timer alarms ring through Do Not Disturb in the Android app. In this browser preview they only beep while the page is open.</p>' : !st ? '<p class="small muted">Checking…</p>' : `
+        ${row(st.notifications, 'Notifications', 'So timers ring when bitrecipe is closed or the screen is off.', '<button class="btn alt" data-perm="notifications">ALLOW</button>')}
+        ${row(st.exactAlarms, 'On-the-second timing', 'Without it, Android may ring a timer up to a minute late.', '<button class="btn alt" data-perm="exact">FIX</button>')}
+        ${row(st.dnd, 'Ring through Do Not Disturb', 'Timers already use the alarm sound, which Do Not Disturb lets through unless you muted alarms. Turn this on to get through even then.', '<button class="btn alt" data-perm="dnd">ALLOW</button>')}
+        <button class="btn ghost block" id="testTimer" style="margin-top:12px">TEST: RING IN 10 SECONDS</button>`}
+    </div>
+
+    <div class="panel">
+      <div class="h">📌 PINTEREST BOARDS</div>
+      <p class="small muted" style="margin-bottom:10px">Follow a <b>public</b> board. Pins you add to it that link to a recipe show up in your cookbook marked NEW for a quick check. bitrecipe looks for new pins whenever you open it.</p>
+      <div class="row"><input class="field grow" id="boardUrl" placeholder="pinterest.com/you/dinner-ideas"><button class="btn" id="addBoard">FOLLOW</button></div>
+      <div id="boardMsg"></div>
+      ${boards.map((b, k) => `<div class="setrow"><div class="grow"><b>${esc(b.name)}</b><span class="small muted">${b.error ? `<span style="color:var(--accent)">${esc(b.error)}</span>` : b.last ? `checked ${ago(b.last)} · ${b.added || 0} added` : 'not checked yet'}</span></div><button class="x pill" data-unboard="${k}">✕ unfollow</button></div>`).join('')}
+      ${boards.length ? `<button class="btn ghost block" id="syncNow" style="margin-top:10px" ${session.syncing ? 'disabled' : ''}>${session.syncing ? '⟳ CHECKING…' : '⟳ CHECK NOW'}</button>` : ''}
+      ${!BitNative ? '<p class="hint">Board syncing works in the Android app (browsers block reading Pinterest).</p>' : ''}
+    </div>
+
+    <div class="panel">
+      <div class="h">TIKTOK & REELS</div>
+      <p class="small muted">TikTok and Instagram don’t let other apps read your saved collections, so there’s no auto-sync for those. Instead, tap <b>Share</b> on any video and pick <b>bitrecipe</b>, which takes two taps.</p>
+    </div>
+
+    <div class="panel">
+      <div class="h">LOOK & FEEL</div>
+      <button class="btn ghost block" data-go="#/theme">🎨 COLOURS & THEMES</button>
+      <div class="setrow" style="margin-top:10px"><div class="grow"><b>Animations</b><span class="small muted">Steam, bubbling timers, confetti and wipes.</span></div>
+        <div class="seg-ctl" style="width:150px"><button data-motion="1" class="${db.prefs.motion !== false ? 'on' : ''}">ON</button><button data-motion="0" class="${db.prefs.motion === false ? 'on' : ''}">CALM</button></div></div>
+    </div>
+    <p class="small muted" style="text-align:center">★ ${db.xp || 0} XP · ${db.recipes.length} recipes</p>
+  </main>`;
+}
+
+const ago = (t) => { const m = Math.round((Date.now() - t) / 60000); return m < 1 ? 'just now' : m < 60 ? `${m} min ago` : m < 1440 ? `${Math.round(m / 60)} h ago` : `${Math.round(m / 1440)} d ago`; };
+
+async function refreshAlerts() {
+  if (!BitNative) return;
+  try { session.alerts = await BitNative.alertStatus(); } catch { session.alerts = null; }
+  if (location.hash.startsWith('#/settings')) rerender();
+}
+
+// ---------- Pinterest sync ----------
+async function runPinterestSync(manual = false) {
+  const boards = db.pinterest?.boards || [];
+  if (!boards.length || session.syncing || !BitNative && !manual) return;
+  session.syncing = true;
+  if (['', '#/', '#/settings'].includes(location.hash)) rerender();
+  try {
+    const { added } = await syncBoards(boards, {
+      saveRecipe: (rec) => { db.recipes.unshift(rec); emit('recipe.saved', { recipeId: rec.id, title: rec.title, platform: 'pinterest' }); },
+      isKnownUrl: (u) => db.recipes.some((r) => r.source?.url === u),
+    });
+    save();
+    if (added) toast(`📌 ${added} new recipe${added > 1 ? 's' : ''} from Pinterest`);
+    else if (manual) toast('No new recipe pins');
+  } catch { if (manual) toast('Couldn’t reach Pinterest'); }
+  session.syncing = false;
+  if (['', '#/', '#/settings'].includes(location.hash)) rerender();
+}
 
 function themeView() {
   const cur = theme();
@@ -355,9 +431,12 @@ function renderCook() {
   const el = document.createElement('div');
   el.className = 'cook';
   if (c.finished) {
-    el.innerHTML = `<div class="stage win">${logoSvg({ size: 96 })}<div class="xp">QUEST<br>COMPLETE<br>+50 XP</div><p class="muted">${esc(r.title)} · cooked ${r.cooked}×</p></div>
+    el.innerHTML = `<div class="stage win">${logoSvg({ size: 96 })}<div class="xp">QUEST<br>COMPLETE<br>+<span id="xpn">0</span> XP</div><p class="muted">${esc(r.title)} · cooked ${r.cooked}×</p></div>
       <button class="btn block" id="cookClose">BACK TO RECIPE</button>`;
     confetti();
+    // count the XP up like an arcade score
+    let n = 0;
+    const up = setInterval(() => { n += 5; const el = document.getElementById('xpn'); if (!el || n > 50) return clearInterval(up); el.textContent = n; }, 60);
   } else {
     const s = r.steps[c.i];
     const k = laneIndex(r).indexOf(s.lane) + 1;
@@ -365,7 +444,7 @@ function renderCook() {
     const running = timers.filter((t) => t.recipe === r.id && t.end > Date.now()).map((t) => t.label);
     el.innerHTML = `
       <div class="bar"><button class="icon-btn" id="cookClose" aria-label="Close">✕</button><div class="quest"><i style="width:${pct}%"></i></div><span class="px" style="font-size:10px">${c.i + 1}/${r.steps.length}</span></div>
-      <div class="stage">
+      <div class="stage ${c.dir || ''}">
         <div class="where"><span class="tag lane-${k}">${esc(s.lane)} · ${esc(laneName(r, s.lane))}</span>${s.wait ? '<span class="pill off">hands-off</span>' : ''}
           ${(s.merges || []).map((m) => `<span class="pill">⤵ ${esc(laneName(r, m))} joins</span>`).join('')}</div>
         <div class="bigtext">${renderText(s.text, r, ctx)}</div>
@@ -379,11 +458,11 @@ function renderCook() {
     const t = e.target.closest('button');
     if (!t) return;
     if (t.id === 'cookClose') return closeCook(), render();
-    if (t.id === 'prev') { c.i = Math.max(0, c.i - 1); return renderCook(); }
+    if (t.id === 'prev') { c.i = Math.max(0, c.i - 1); c.dir = 'back'; return renderCook(); }
     if (t.dataset.timer) return startTimer(r, t.dataset.timer);
     if (t.id === 'next') {
       ctx.done.add(r.steps[c.i].id);
-      if (c.i < r.steps.length - 1) { c.i++; return renderCook(); }
+      if (c.i < r.steps.length - 1) { c.i++; c.dir = 'fwd'; return renderCook(); }
       r.cooked = (r.cooked || 0) + 1;
       db.xp = (db.xp || 0) + 50;
       emit('recipe.cooked', { recipeId: r.id, title: r.title, xp: 50, cookedCount: r.cooked });
@@ -411,13 +490,47 @@ function confetti() {
 }
 
 // ---------- named timers ----------
-const timers = [];
-function startTimer(r, stepId) {
+// In the Android app each timer is also a real alarm (BitNative.scheduleTimer):
+// it rings with the alarm sound even when bitrecipe is closed, the screen is
+// off, or Do Not Disturb is on. The chips here are the in-app view of them.
+const timers = (db.timers || []).filter((t) => !t.dismissed && t.end > Date.now() - 10 * 60000);
+const saveTimers = () => { db.timers = timers.filter((t) => !t.dismissed); save(); };
+
+async function ensureAlerts() {
+  if (!BitNative) return true;
+  try {
+    let st = await BitNative.alertStatus();
+    if (!st.notifications) {
+      toast('Allow notifications so timers can ring when the app is closed');
+      st = await BitNative.requestNotifications();
+    }
+    if (st.notifications && !db.prefs.dndAsked && !st.dnd) {
+      db.prefs.dndAsked = true; save();
+      setTimeout(() => toast('Tip: Settings ⚙ › Timer alerts lets timers ring through Do Not Disturb'), 2800);
+    }
+    return st.notifications;
+  } catch { return false; }
+}
+
+async function startTimer(r, stepId) {
   const s = r.steps.find((x) => x.id === stepId);
   if (!s?.timer) return;
-  if (timers.some((t) => t.step === stepId && t.end > Date.now())) return toast('That timer is already running');
-  timers.push({ id: Math.random().toString(36).slice(2), recipe: r.id, step: stepId, label: s.timer.label, end: Date.now() + s.timer.min * 60000, rang: false });
+  if (timers.some((t) => t.step === stepId && t.end > Date.now() && !t.dismissed)) return toast('That timer is already running');
+  const t = { id: Math.random().toString(36).slice(2), nid: Math.floor(Math.random() * 2e9), recipe: r.id, title: r.title, step: stepId, label: s.timer.label, start: Date.now(), end: Date.now() + s.timer.min * 60000, rang: false };
+  timers.push(t);
+  saveTimers();
   toast(`⏱ ${s.timer.label} · ${minutesText(s.timer.min)} started`);
+  tick();
+  if (BitNative && (await ensureAlerts())) {
+    BitNative.scheduleTimer({ id: t.nid, at: t.end, label: t.label, recipe: r.title }).then((res) => {
+      if (res && !res.exact) toast('Timer set, but may ring up to a minute late — see Settings ⚙ › Timer alerts');
+    }).catch(() => toast('Could not set the alarm; keep bitrecipe open'));
+  }
+}
+function stopTimer(t) {
+  t.dismissed = true;
+  BitNative?.cancelTimer({ id: t.nid }).catch(() => {});
+  saveTimers();
   tick();
 }
 let audio;
@@ -434,31 +547,35 @@ function beep(n = 4) {
     navigator.vibrate?.([200, 100, 200]);
   } catch { /* no audio */ }
 }
+let tickHandle;
 function tick() {
+  clearTimeout(tickHandle);
   const box = document.getElementById('timers');
   const now = Date.now();
   for (let i = timers.length - 1; i >= 0; i--) if (timers[i].dismissed) timers.splice(i, 1);
   box.innerHTML = timers.map((t) => {
     const left = Math.max(0, t.end - now);
-    if (!left && !t.rang) { t.rang = true; beep(); }
+    // the native alarm rings in the Android app; the browser preview beeps instead
+    if (!left && !t.rang) { t.rang = true; if (!BitNative) beep(); saveTimers(); }
     const m = Math.floor(left / 60000), s = Math.floor((left % 60000) / 1000);
-    return `<div class="tchip${left ? '' : ' ring'}">${esc(t.label.toUpperCase())} ${left ? `${m}:${String(s).padStart(2, '0')}` : 'DONE!'}<button data-stop="${t.id}" aria-label="Dismiss">✕</button></div>`;
+    const pct = t.start ? Math.min(100, ((now - t.start) / (t.end - t.start)) * 100) : 0;
+    return `<div class="tchip${left ? '' : ' ring'}"><span class="pot${left ? ' boil' : ''}"></span>${esc(t.label.toUpperCase())} ${left ? `${m}:${String(s).padStart(2, '0')}` : 'DONE!'}<button data-stop="${t.id}" aria-label="Stop">✕</button><i class="tprog" style="width:${pct}%"></i></div>`;
   }).join('');
-  if (timers.some((t) => !t.rang || t.end > now)) setTimeout(tick, 500);
-  else if (timers.length) setTimeout(tick, 1500); // keep ringing chips visible
+  if (timers.length) tickHandle = setTimeout(tick, 500);
 }
 document.getElementById('timers').addEventListener('click', (e) => {
   const id = e.target.closest('[data-stop]')?.dataset.stop;
   const t = timers.find((x) => x.id === id);
-  if (t) { t.dismissed = true; tick(); }
+  if (t) stopTimer(t);
 });
+if (timers.length) tick();
 
 // ---------- import flow ----------
 async function runImport(input) {
   const text = input.trim();
   if (!text) return toast('Paste a link or some recipe text first');
   const box = document.getElementById('importing');
-  if (box) box.innerHTML = '<div class="loading"><div class="loadbar"><i></i></div><span class="px small">READING…</span></div>';
+  if (box) box.innerHTML = '<div class="loading"><div class="loadbar"><i></i></div><span class="px small">READING</span></div>';
   try {
     const { recipe, flags } = await importAnything(text);
     session.draft = recipe;
@@ -490,6 +607,7 @@ function render() {
   if (route === 'add') html = addView();
   else if (route === 'review') html = reviewView();
   else if (route === 'theme') html = themeView();
+  else if (route === 'settings') { html = settingsView(); if (!session.alerts) refreshAlerts(); }
   else if (route === 'r' && byId(arg)) html = recipeView(byId(arg));
   else if (route === 'edit' && byId(arg)) {
     if (session.editing !== arg) {
@@ -503,6 +621,7 @@ function render() {
   if (route !== 'review' && route !== 'edit') window.scrollTo(0, 0);
 }
 let lastRoute = '';
+let enterT;
 window.addEventListener('hashchange', () => {
   const route = location.hash.split('/')[1] || '';
   if (!['review', 'edit'].includes(route)) session.editing = null;
@@ -511,6 +630,7 @@ window.addEventListener('hashchange', () => {
   const y = window.scrollY;
   render();
   if (keepScroll) window.scrollTo(0, y);
+  else { document.body.classList.add('enter'); clearTimeout(enterT); enterT = setTimeout(() => document.body.classList.remove('enter'), 900); }
 });
 
 function rerender() { const y = window.scrollY; render(); window.scrollTo(0, y); }
@@ -563,6 +683,7 @@ $app.addEventListener('click', (e) => {
       syncDraft();
       const rec = finalize(structuredClone(dr));
       rec.ingredients.forEach((i) => { delete i.edited; });
+      delete rec.needsReview; delete rec.reviewFlags;
       const idx = db.recipes.findIndex((x) => x.id === rec.id);
       if (idx >= 0) db.recipes[idx] = rec; else { db.recipes.unshift(rec); emit('recipe.saved', { recipeId: rec.id, title: rec.title, platform: rec.source?.platform }); }
       if (!session.editing) emit('recipe.scraped', { recipeId: rec.id, platform: rec.source?.platform });
@@ -586,6 +707,7 @@ $app.addEventListener('click', (e) => {
     if (d.have) { const h = (session.have[r.id] ||= new Set()); h.has(d.have) ? h.delete(d.have) : h.add(d.have); return rerender(); }
     if (d.step && !e.target.closest('a')) { const s = ctxFor(r).done; s.has(d.step) ? s.delete(d.step) : s.add(d.step); return rerender(); }
     if (t.id === 'cook') return openCook(r);
+    if (t.id === 'looksGood') { delete r.needsReview; delete r.reviewFlags; save(); toast('Saved for good'); return rerender(); }
     if (t.id === 'dup') {
       const copy = structuredClone(r);
       copy.id = 'r' + Date.now().toString(36);
@@ -601,6 +723,33 @@ $app.addEventListener('click', (e) => {
       return location.replace('#/');
     }
   }
+
+  // settings screen
+  if (d.perm && BitNative) {
+    const go = d.perm === 'notifications' ? BitNative.requestNotifications() : d.perm === 'exact' ? BitNative.openExactAlarmSettings() : BitNative.openDndSettings();
+    return go.then(refreshAlerts).catch(() => {});
+  }
+  if (t.id === 'testTimer') {
+    const fake = { id: 'test', title: 'Test', steps: [{ id: 'test-step', timer: { min: 10 / 60, label: 'Test' } }] };
+    return startTimer(fake, 'test-step');
+  }
+  if (t.id === 'addBoard') {
+    const input = document.getElementById('boardUrl').value;
+    const msg = document.getElementById('boardMsg');
+    if (!input.trim()) return toast('Paste a board link first');
+    msg.innerHTML = '<div class="loading"><div class="loadbar"><i></i></div></div>';
+    return resolveBoard(input).then((b) => {
+      db.pinterest ||= { boards: [] };
+      if (db.pinterest.boards.some((x) => x.feed === b.feed)) throw new Error('Already following that board');
+      db.pinterest.boards.push(b); save();
+      toast(`Following “${b.name}”`);
+      rerender();
+      runPinterestSync(true);
+    }).catch((err) => { msg.innerHTML = `<div class="flag bad" style="margin-top:10px">${esc(/fetch|network|Failed/i.test(err.message) && !BitNative ? 'The browser preview can’t read Pinterest. Use the Android app.' : err.message)}</div>`; });
+  }
+  if (d.unboard != null) { db.pinterest.boards.splice(+d.unboard, 1); save(); return rerender(); }
+  if (t.id === 'syncNow') return runPinterestSync(true);
+  if (d.motion) { db.prefs.motion = d.motion === '1'; save(); setMotion(); return rerender(); }
 
   // theme screen
   if (d.preset) { db.theme = { preset: d.preset, custom: null }; paint(theme()); save(); return rerender(); }
@@ -625,5 +774,20 @@ document.addEventListener('keydown', (e) => {
   if (e.key === 'ArrowLeft') document.getElementById('prev')?.click();
   if (e.key === 'Escape') document.getElementById('cookClose')?.click();
 });
+
+function setMotion() {
+  const calm = db.prefs.motion === false || matchMedia('(prefers-reduced-motion: reduce)').matches;
+  document.documentElement.classList.toggle('calm', calm);
+}
+setMotion();
+
+// Check followed Pinterest boards on launch and when coming back to the app.
+document.addEventListener('visibilitychange', () => {
+  if (document.visibilityState !== 'visible') return;
+  refreshAlerts();
+  const last = Math.min(...(db.pinterest?.boards || []).map((b) => b.last || 0));
+  if (Date.now() - last > 15 * 60000) runPinterestSync();
+});
+setTimeout(() => runPinterestSync(), 1500);
 
 render();

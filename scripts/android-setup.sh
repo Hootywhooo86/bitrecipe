@@ -9,7 +9,8 @@ cd "$(dirname "$0")/.."
 
 PKG_DIR=android/app/src/main/java/com/bit128/bitrecipe
 mkdir -p "$PKG_DIR"
-cp native/android/MainActivity.java native/android/BitNativePlugin.java "$PKG_DIR/"
+cp native/android/*.java "$PKG_DIR/"
+cp -r native/android/res/. android/app/src/main/res/
 
 MANIFEST=android/app/src/main/AndroidManifest.xml
 if ! grep -q 'android.intent.action.SEND' "$MANIFEST"; then
@@ -28,6 +29,28 @@ share = '''
 marker = '</activity>'
 i = s.index(marker)
 s = s[:i] + share + '        ' + s[i:]
+open(p, 'w').write(s)
+PY
+fi
+
+if ! grep -q 'TimerReceiver' "$MANIFEST"; then
+  # Timer alarms: notification permission, exact alarms, DND access, vibration, and the receiver.
+  python3 - "$MANIFEST" <<'PY'
+import sys
+p = sys.argv[1]
+s = open(p).read()
+perms = '''
+    <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+    <uses-permission android:name="android.permission.USE_EXACT_ALARM" />
+    <uses-permission android:name="android.permission.SCHEDULE_EXACT_ALARM" android:maxSdkVersion="32" />
+    <uses-permission android:name="android.permission.ACCESS_NOTIFICATION_POLICY" />
+    <uses-permission android:name="android.permission.VIBRATE" />
+'''
+receiver = '''
+        <receiver android:name=".TimerReceiver" android:exported="false" />
+'''
+s = s.replace('</manifest>', perms + '</manifest>')
+s = s.replace('</application>', receiver + '    </application>')
 open(p, 'w').write(s)
 PY
 fi

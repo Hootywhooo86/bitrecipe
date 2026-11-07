@@ -151,6 +151,7 @@ export function itemText(ing, factor = 1, part = 1) {
 
 export function minutesText(min) {
   if (!min) return '';
+  if (min < 1) return `${Math.round(min * 60)}s`;
   if (min < 60) return `${min}m`;
   const h = Math.floor(min / 60), m = min % 60;
   return m ? `${h}h ${m}m` : `${h}h`;

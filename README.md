@@ -24,6 +24,9 @@ The real app lives in `app/` and is wrapped as an Android APK with Capacitor. Ev
 - **Amounts inside every step** ("Whisk **2¼ cups flour**…"), scaled by the servings stepper and switchable between *as written*, *metric* and *US cups*. Cups↔grams uses per-ingredient densities, not one blanket number.
 - **Before you start:** an equipment list and a prep checklist (minced, softened, melted…).
 - **Cook mode:** one big step at a time, screen kept awake, named timers that keep running across steps (with a pixel beep and vibration), and +50 XP with confetti at the end.
+- **Timer alarms:** in the Android app every timer is a real alarm. It rings with the alarm sound when the app is closed or the screen is off, keeps ringing until you tap STOP, and is set to get through Do Not Disturb. Settings › Timer alerts asks for notification permission, exact timing and Do Not Disturb access, and has a 10-second test.
+- **Pinterest boards:** follow a public board in Settings. New pins that link to a recipe are imported automatically (board RSS → pin → recipe site → recipe data) and marked NEW for a quick check. bitrecipe checks when you open it. TikTok and Instagram don't let apps read saved collections, so those use the share sheet.
+- **Animations:** steam on the logo, bubbling timer pots with progress bars, screens and Track Map steps popping in, cook-mode wipes, a check-off pop and an arcade XP count-up. A Calm switch in Settings turns them off, and the phone's reduce-motion setting is respected.
 - **My version:** copies a recipe so you can change it while the original stays untouched.
 - **Colours:** six presets plus a custom colour for every token, with a contrast check and a one-tap "fix readability". The logo recolours with the theme.
 - **Private by default.** Recipes stay on the phone (localStorage). Each recipe keeps its creator, original link and video timestamps.
@@ -52,7 +55,7 @@ Imported recipes get their tracks guessed from phrases like "meanwhile", "in a s
 - **Locally** (needs the Android SDK and Java 17): `npm install && npm run android:build`. The APK is written to `android/app/build/outputs/apk/debug/`.
 - **Browser preview:** `npm run serve`, then open http://localhost:8080. Link import only works inside the APK, because browsers block reading other sites. Pasted text works everywhere.
 
-Native bits live in `native/android/`: the share-sheet receiver and keep-screen-awake. `scripts/android-setup.sh` copies them into the generated project and registers the share intent.
+Native bits live in `native/android/`: the share-sheet receiver, keep-screen-awake, theme-coloured system bars, and alarm timers (`TimerReceiver`, its alarm channel, and the permissions). `scripts/android-setup.sh` copies them into the generated project and registers the share intent.
 
 ### Not in v1 yet (honest list)
 
