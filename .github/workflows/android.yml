@@ -3,8 +3,12 @@ name: Build Android APK
 on:
   push:
     branches: [main, 'ccr-*']
+    tags: ['v*']
     paths: ['app/**', 'native/**', 'assets/**', 'scripts/**', 'package.json', 'capacitor.config.json', '.github/workflows/android.yml']
   workflow_dispatch:
+
+permissions:
+  contents: write
 
 jobs:
   apk:
@@ -31,3 +35,15 @@ jobs:
         with:
           name: bitrecipe-apk
           path: bitrecipe-debug.apk
+      - name: Publish GitHub Release (version tags only)
+        if: startsWith(github.ref, 'refs/tags/v')
+        uses: softprops/action-gh-release@v2
+        with:
+          name: bitrecipe ${{ github.ref_name }}
+          files: bitrecipe-debug.apk
+          body: |
+            bitrecipe for Android.
+
+            **Install:** download `bitrecipe-debug.apk` below on your phone, open it, and allow "install unknown apps" when Android asks.
+
+            This is a debug (test) build, not a Play Store build.
