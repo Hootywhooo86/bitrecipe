@@ -746,7 +746,8 @@ async function runImport(input) {
   if (box) box.innerHTML = `<div class="loading"><div class="runway">${chef(40)}</div><div class="loadbar"><i></i></div><span class="px small">READING</span></div>`;
   try {
     const { recipe, flags } = await importAnything(text);
-    recipe.importDebug = { ...(recipe.importDebug || {}), input: text.slice(0, 6000) };
+    const caught = recipe.importDebug?.input;
+    recipe.importDebug = { ...(recipe.importDebug || {}), input: (caught && caught !== text ? `${text}\n\n--- caption read from the link ---\n${caught}` : text).slice(0, 6000) };
     session.draft = recipe;
     session.flags = flags;
     session.pendingInput = '';

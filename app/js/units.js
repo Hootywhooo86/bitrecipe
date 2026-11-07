@@ -146,6 +146,8 @@ export function amountText(ing, factor = 1, system = 'orig', part = 1) {
 
 export function itemText(ing, factor = 1, part = 1) {
   if (ing.unit || ing.qty == null) return ing.item;
+  // only pluralise simple names ("egg" -> "eggs"), not phrases like "eggs plus one yolk"
+  if (ing.item.split(/\s+/).length > 3 || /\b(plus|and|or|with)\b/i.test(ing.item)) return ing.item;
   return plural(ing.item, ing.qty * factor * part);
 }
 

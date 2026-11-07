@@ -9,12 +9,18 @@ import { normUnit, UNIT_WORDS, COUNT_UNITS } from './units.js';
 const UNI_FRAC = { '½': '1/2', '⅓': '1/3', '⅔': '2/3', '¼': '1/4', '¾': '3/4', '⅛': '1/8', '⅜': '3/8', '⅝': '5/8', '⅞': '7/8', '⅕': '1/5' };
 const QTY = String.raw`(?:\d+\s+\d+\/\d+|\d+\/\d+|\d+(?:[.,]\d+)?)`;
 const unitAlt = UNIT_WORDS.map((u) => u.replace(/[.*+?^${}()|[\]\\]/g, '\\$&').replace(/ /g, '\\s')).join('|');
-const ING_RE = new RegExp(String.raw`^(${QTY}|an?)(?:\s*(?:-|–|to)\s*(${QTY}))?\s*(?:(${unitAlt})\.?(?=[\s,)(]|$))?\s*(?:of\s+)?(.*)$`);
+const SIZE = String.raw`(?:(?:small|medium|large|big|heaping|heaped|level|rounded)\s+(?=(?:${unitAlt})\b))?`;
+const ING_RE = new RegExp(String.raw`^(${QTY}|an?)(?:\s*(?:-|–|to)\s*(${QTY}))?\s*${SIZE}(?:(${unitAlt})\.?(?=[\s,)(]|$))?\s*(?:of\s+)?(.*)$`);
 const LOOSE_RE = /\b(to taste|as needed|for (?:garnish|serving|frying|greasing)|optional)\b/i;
 const VAGUE_RE = /\b(handful|splash|drizzle|glug|some|bit of|sprinkle|dollop|squeeze|knob)\b/i;
 
 const ING_HEAD = /^(?:ingredients?|you(?:'|’)ll need|what you need|shopping list)\b\s*:?\s*(.*)$/i;
-const STEP_HEAD = /^(?:method|instructions?|directions?|steps?|how to(?: make(?: it)?)?|preparation|recipe)\b\s*:?\s*(.*)$/i;
+const STEP_HEAD = /^(?:method|instructions?|directions?|steps?|how to(?: make(?: it)?)?|preparation)\b\s*:?\s*(.*)$/i;
+// Short "Dough:" / "For the sauce:" style headings inside a list.
+const GROUP_HEAD = /^([A-Za-z][A-Za-z'’ ]{0,28}):$/;
+const VERB_START = /^(?:then\s+|next\s+|finally\s+)?(bake|preheat|mix|add|combine|stir|whisk|beat|cream|fold|pour|place|put|heat|cook|fry|boil|simmer|roast|grill|serve|top|roll|scoop|chill|let|leave|cut|slice|chop|season|spread|sprinkle|brush|melt|blend|knead|shape|form|press|remove|transfer|cover|refrigerate|garnish|drizzle|toss|flip|repeat|enjoy|line|grease|spray|microwave|air fry|marinate|mash|squeeze|dip|coat|assemble|layer|wrap|bring|reduce|drain|rinse|soak|set|wait|allow|make|start|in a)\b/i;
+const WORD_NUM = { one: 1, two: 2, three: 3, four: 4, five: 5, six: 6, seven: 7, eight: 8, nine: 9, ten: 10, eleven: 11, twelve: 12, half: '1/2', a: null };
+const wordNums = (l) => l.replace(/^(one|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve|half)\b(\s+(?:a|an)\b)?/i, (w) => String(WORD_NUM[w.split(/\s/)[0].toLowerCase()]));
 const SUB_HEAD = /^for the ([\w\s]+?):?$/i;
 
 let uid = 0;
@@ -40,7 +46,7 @@ export function cleanLine(line) {
 
 // "2 1/4 cups flour, sifted" -> {qty, qty2, unit, item, prep}
 export function parseIngredientLine(raw) {
-  const line = cleanLine(raw);
+  const line = wordNums(cleanLine(raw));
   if (!line) return null;
   const ing = { id: newId('i'), qty: null, unit: '', item: line, prep: '', raw: line };
   const m = line.match(ING_RE);
@@ -53,10 +59,11 @@ export function parseIngredientLine(raw) {
     rest = m[4] || '';
     if (m[3] && !u) rest = `${m[3]} ${rest}`;
   }
-  rest = rest.replace(/^\(([^)]*)\)\s*/, (_, inner) => { ing.note = inner; return ''; });
+  const notes = [];
+  rest = rest.replace(/\s*\(([^)]*)\)\s*/g, (_, inner) => { notes.push(inner.trim()); return ' '; }).trim();
   const comma = rest.indexOf(',');
   ing.item = (comma > 0 ? rest.slice(0, comma) : rest).trim();
-  ing.prep = comma > 0 ? rest.slice(comma + 1).trim() : '';
+  ing.prep = [comma > 0 ? rest.slice(comma + 1).trim() : '', ...notes].filter(Boolean).join(', ');
   const loose = line.match(LOOSE_RE);
   if (loose) {
     ing.item = ing.item.replace(LOOSE_RE, '').replace(/[,\s]+$/, '').trim();
@@ -76,7 +83,7 @@ export function parseIngredientLine(raw) {
 }
 
 const looksLikeIngredient = (l) => {
-  const c = cleanLine(l);
+  const c = wordNums(cleanLine(l));
   return c.length < 80 && (new RegExp(`^${QTY}`).test(c) || /^an?\s+(pinch|handful|splash|knob|dash)/i.test(c) || LOOSE_RE.test(c)) && !/[.!?]$/.test(c.replace(/\b(tsp|tbsp|oz|lb)\.$/, ''));
 };
 const numbered = /^\s*(?:step\s*)?\d+\s*[.):-]\s+/i;
@@ -84,6 +91,13 @@ const numbered = /^\s*(?:step\s*)?\d+\s*[.):-]\s+/i;
 function splitInline(text) {
   // "1. Boil 2. Melt 3. Toss" on one line -> separate steps
   return text
+    // caption style: "•1 cup butter •1 egg" bullets, and "  " gaps between items
+    .replace(/\s*[•▪◦●■►▸➤✅✔☑🔸🔹🔶🔷🟡🟢⭐]\uFE0F?\s*/gu, '\n')
+    .replace(/[^\S\n]{2,}(?=[A-Z0-9])/g, '\n')
+    // inline headings: "... Dough: ..." / "for the sauce:"
+    .replace(/[^\S\n]+(for the [a-z ]{1,24}?):/gi, '\n$1:')
+    .replace(/[^\S\n]+([A-Z][A-Za-z'’]{2,}):(?=\s|$)/g, '\n$1:')
+    .replace(/:[^\S\n]+(?=\S)/g, (m, i, str) => (/\n[^\n]{0,30}$/.test(str.slice(Math.max(0, i - 31), i)) || i < 30 ? ':\n' : m))
     .replace(/\s*\b(ingredients|method|instructions|directions|steps)\s*:/gi, '\n$1:')
     .replace(/\s+(?=(?:step\s*)?\d{1,2}[.)]\s+[A-Z])/g, '\n');
 }
@@ -113,18 +127,27 @@ export function parseText(text) {
       continue;
     }
     if ((m = l.match(SUB_HEAD))) { section = m[1].trim(); continue; }
+    if ((m = l.match(GROUP_HEAD)) && !/\d/.test(l)) {
+      const name = m[1].trim();
+      if (/^recipe$/i.test(name)) continue;
+      if (!out.title && !out.ingredientLines.length) { out.title = name.replace(/\s+recipe$/i, ''); continue; }
+      // a heading inside the ingredient list groups ingredients, not cooking tracks
+      section = mode === 'step' ? name : null;
+      continue;
+    }
     if (mode === 'ing' && numbered.test(l) && l.length > 50) mode = 'step';
     if (mode === 'ing' || (mode === null && looksLikeIngredient(l))) {
       if (mode === 'ing' && l.length > 90 && !looksLikeIngredient(l)) { mode = 'step'; out.stepLines.push({ text: l.replace(numbered, ''), section }); continue; }
-      out.ingredientLines.push(l);
+      // "1 cup flour, 1 cup milk, 1 egg." on one line -> separate ingredients
+      l.replace(/\.$/, '').split(/,\s*(?=(?:\d|[½¼¾⅓⅔]|(?:one|two|three|four|five|six|a|an|half)\s))/i).forEach((part) => part.trim() && out.ingredientLines.push(part.trim()));
       continue;
     }
-    if (mode === 'step' || numbered.test(l) || (out.title && l.split(' ').length > 5)) {
+    if (mode === 'step' || numbered.test(l) || (out.title && (l.split(' ').length > 5 || VERB_START.test(l)))) {
       mode = mode || 'step';
       out.stepLines.push({ text: l.replace(numbered, ''), section });
       continue;
     }
-    if (!out.title) out.title = l.replace(/[\p{Extended_Pictographic}\uFE0F\u200D]/gu, '').replace(/[!:\s]+$/, '').slice(0, 80);
+    if (!out.title) out.title = l.replace(/[\p{Extended_Pictographic}\uFE0F\u200D]/gu, '').replace(/[!:\s]+$/, '').replace(/\s+recipe$/i, '').slice(0, 80);
   }
   return out;
 }
@@ -354,7 +377,7 @@ export function buildDraft({ title, ingredientLines, stepLines, servings, source
 // ---------- sources ----------
 
 export function platformOf(url) {
-  if (/tiktok\.com/i.test(url)) return 'tiktok';
+  if (/tiktok\.com/i.test(url)) return 'tiktok'; // includes vt./vm. short links
   if (/instagram\.com/i.test(url)) return 'instagram';
   if (/youtube\.com|youtu\.be/i.test(url)) return 'youtube';
   return 'web';
@@ -407,31 +430,81 @@ function metaContent(doc, prop) {
   return el ? el.getAttribute('content') : null;
 }
 
-async function getText(url) {
+const MOBILE_UA = 'Mozilla/5.0 (Linux; Android 14; Pixel 7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0 Mobile Safari/537.36';
+
+async function getRes(url, headers = {}) {
   let res;
   try {
-    res = await fetch(url, { headers: { Accept: 'text/html,application/json' } });
+    res = await fetch(url, { headers: { Accept: 'text/html,application/json', ...headers } });
   } catch (e) {
     const native = window.Capacitor?.isNativePlatform?.();
     throw new Error(native ? 'Could not reach that link. Check your connection, or paste the recipe text instead.' : 'The browser preview can’t read other sites (the Android app can). Paste the recipe text instead.');
   }
   if (!res.ok) throw new Error(`That site answered ${res.status}. Paste the recipe text instead.`);
-  return res.text();
+  return { text: await res.text(), url: res.url || url };
+}
+const getText = async (url, headers) => (await getRes(url, headers)).text;
+
+// Find the post object (has "desc") anywhere in TikTok's embedded page data.
+function findItem(o, depth = 0) {
+  if (!o || typeof o !== 'object' || depth > 8) return null;
+  if (typeof o.desc === 'string' && (o.author || o.video)) return o;
+  for (const v of Object.values(o)) { const r = findItem(v, depth + 1); if (r) return r; }
+  return null;
+}
+
+// TikTok: the caption lives in the video page's data (their embed service no
+// longer includes it). Short vt./vm. links redirect to the full page.
+export function tiktokFromHtml(html) {
+  for (const id of ['__UNIVERSAL_DATA_FOR_REHYDRATION__', 'SIGI_STATE', '__NEXT_DATA__']) {
+    const m = html.match(new RegExp(`<script[^>]*id="${id}"[^>]*>([\\s\\S]*?)</script>`));
+    if (!m) continue;
+    try {
+      const item = findItem(JSON.parse(m[1]));
+      if (item?.desc) {
+        return { caption: item.desc, creator: item.author?.uniqueId ? '@' + item.author.uniqueId : item.author?.nickname || '', image: item.video?.cover || item.video?.originCover || null, id: item.id };
+      }
+    } catch { /* try the next shape */ }
+  }
+  const raw = html.match(/"desc":"((?:[^"\\]|\\.){20,})"/);
+  if (raw) { try { return { caption: JSON.parse(`"${raw[1]}"`), creator: '', image: null }; } catch { /* ignore */ } }
+  return null;
+}
+
+async function importVideo(url, platform, source) {
+  let caption = '', image = null;
+  if (platform === 'tiktok') {
+    try {
+      const page = await getRes(url, { 'User-Agent': MOBILE_UA, 'Accept-Language': 'en-US,en;q=0.9' });
+      const info = tiktokFromHtml(page.text);
+      if (info) {
+        caption = info.caption; image = info.image; source.creator = info.creator;
+        if (/tiktok\.com\/@/.test(page.url)) source.url = page.url.split('?')[0];
+      }
+    } catch { /* fall back to oEmbed */ }
+  }
+  if (!caption) {
+    const endpoint = platform === 'tiktok' ? 'https://www.tiktok.com/oembed?url=' : 'https://www.youtube.com/oembed?format=json&url=';
+    try {
+      const data = JSON.parse(await getText(endpoint + encodeURIComponent(url)));
+      caption = data.title || '';
+      source.creator ||= data.author_name || '';
+      image ||= data.thumbnail_url || null;
+    } catch { /* nothing more to try */ }
+  }
+  if (!caption) throw new Error(`Couldn’t read this ${platform === 'tiktok' ? 'TikTok' : 'video'}’s caption. Open the video, copy the caption (tap “more”), and paste it here.`);
+  const parsed = parseText(caption);
+  const flags = [{ level: 'info', text: `Read the ${platform === 'tiktok' ? 'TikTok caption' : 'video title'} only. Spoken steps and on-screen text are not read yet — check against the video.` }];
+  if (caption.length < 60 || !parsed.ingredientLines.length) flags.push({ level: 'bad', text: 'The caption doesn’t contain the recipe, so it’s probably only spoken in the video. Paste the steps as text, or check the creator’s link in bio.' });
+  const draft = buildDraft({ ...parsed, title: parsed.title || caption.split(/[.!#\n]/)[0].slice(0, 70), source, flags, image });
+  draft.recipe.importDebug.input = caption.slice(0, 6000);
+  return draft;
 }
 
 export async function importUrl(url) {
   const platform = platformOf(url);
   const source = { platform, creator: '', url };
-  if (platform === 'tiktok' || platform === 'youtube') {
-    const endpoint = platform === 'tiktok' ? 'https://www.tiktok.com/oembed?url=' : 'https://www.youtube.com/oembed?format=json&url=';
-    const data = JSON.parse(await getText(endpoint + encodeURIComponent(url)));
-    source.creator = data.author_name || '';
-    const caption = data.title || '';
-    const parsed = parseText(caption);
-    const flags = [{ level: 'info', text: `Read the ${platform === 'tiktok' ? 'TikTok caption' : 'video title'} only. Spoken steps and on-screen text are not read yet — check against the video.` }];
-    if (caption.length < 60) flags.push({ level: 'bad', text: 'The caption is very short, so the recipe is probably only in the video. Paste the steps as text, or check the creator’s link in bio.' });
-    return buildDraft({ ...parsed, title: parsed.title || caption.split(/[.!#\n]/)[0].slice(0, 70), source, flags, image: data.thumbnail_url });
-  }
+  if (platform === 'tiktok' || platform === 'youtube') return importVideo(url, platform, source);
   const html = await getText(url);
   const doc = new DOMParser().parseFromString(html, 'text/html');
   if (platform === 'web') {
@@ -480,10 +553,22 @@ export function importText(text) {
 
 export async function importAnything(input) {
   const t = input.trim();
-  const url = t.match(/https?:\/\/\S+/)?.[0];
-  // A shared TikTok/IG message is often "caption text https://link"; a bare link means fetch it.
-  if (url && t.replace(url, '').trim().length < 40) return importUrl(url);
-  const draft = importText(url ? t.replace(url, '') : t);
-  if (url) draft.recipe.source = { platform: platformOf(url), creator: '', url };
-  return draft;
+  const url = t.match(/https?:\/\/\S+/)?.[0]?.replace(/[)\].,!]+$/, '');
+  if (!url) return importText(t);
+  const rest = t.replace(url, '').trim();
+  // Always try the link first (shares from TikTok/Instagram add extra words);
+  // fall back to the shared text itself if the link gives us nothing.
+  let fromLink = null, linkError = null;
+  try { fromLink = await importUrl(url); } catch (e) { linkError = e; }
+  if (fromLink && fromLink.recipe.ingredients.length) return fromLink;
+  if (rest.length >= 40) {
+    const draft = importText(rest);
+    if (draft.recipe.ingredients.length || !fromLink) {
+      draft.recipe.source = { ...(fromLink?.recipe.source || {}), platform: platformOf(url), url };
+      if (linkError) draft.flags.unshift({ level: 'info', text: 'Couldn’t open the link, so this came from the text that was shared with it.' });
+      return draft;
+    }
+  }
+  if (fromLink) return fromLink;
+  throw linkError;
 }
