@@ -608,6 +608,17 @@ $app.addEventListener('click', (e) => {
   if (t.id === 'resetc') { db.theme.custom = null; paint(theme()); save(); return rerender(); }
 });
 
+// Keyboard: when a box is focused, hide the bottom button bar (it would sit
+// on top of the keyboard) and keep the box in view as the app shrinks.
+const isTyping = () => document.activeElement?.matches?.('input:not([type=checkbox]):not([type=color]), textarea, select');
+document.addEventListener('focusin', () => {
+  if (!isTyping()) return;
+  document.body.classList.add('typing');
+  setTimeout(() => document.activeElement?.scrollIntoView?.({ block: 'center', behavior: 'smooth' }), 300);
+});
+document.addEventListener('focusout', () => setTimeout(() => { if (!isTyping()) document.body.classList.remove('typing'); }, 50));
+window.addEventListener('resize', () => { if (isTyping()) document.activeElement.scrollIntoView({ block: 'center' }); });
+
 document.addEventListener('keydown', (e) => {
   if (!session.cook) return;
   if (e.key === 'ArrowRight') document.getElementById('next')?.click();

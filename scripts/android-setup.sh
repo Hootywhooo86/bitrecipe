@@ -32,6 +32,11 @@ open(p, 'w').write(s)
 PY
 fi
 
+# Resize (not cover) the app when the keyboard opens; MainActivity pads for it.
+if ! grep -q 'windowSoftInputMode' "$MANIFEST"; then
+  sed -i 's|android:name=".MainActivity"|android:name=".MainActivity"\n            android:windowSoftInputMode="adjustResize"|' "$MANIFEST"
+fi
+
 npx capacitor-assets generate --android \
   --iconBackgroundColor '#0b0b16' --iconBackgroundColorDark '#0b0b16' \
   --splashBackgroundColor '#0b0b16' --splashBackgroundColorDark '#0b0b16'

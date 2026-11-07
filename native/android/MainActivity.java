@@ -16,12 +16,14 @@ public class MainActivity extends BridgeActivity {
         super.onCreate(savedInstanceState);
 
         // Keep the app below the status bar (notifications) and above the
-        // navigation bar, never drawn underneath them.
-        WindowCompat.setDecorFitsSystemWindows(getWindow(), true);
+        // navigation bar, and shrink it above the keyboard when it opens, so
+        // nothing is ever drawn underneath them.
+        WindowCompat.setDecorFitsSystemWindows(getWindow(), false);
         View root = findViewById(android.R.id.content);
         ViewCompat.setOnApplyWindowInsetsListener(root, (v, insets) -> {
             Insets bars = insets.getInsets(WindowInsetsCompat.Type.systemBars() | WindowInsetsCompat.Type.displayCutout());
-            v.setPadding(bars.left, bars.top, bars.right, bars.bottom);
+            Insets ime = insets.getInsets(WindowInsetsCompat.Type.ime());
+            v.setPadding(bars.left, bars.top, bars.right, Math.max(bars.bottom, ime.bottom));
             return WindowInsetsCompat.CONSUMED;
         });
 
