@@ -147,7 +147,7 @@ export function parseText(text) {
       out.stepLines.push({ text: l.replace(numbered, ''), section });
       continue;
     }
-    if (!out.title) out.title = l.replace(/[\p{Extended_Pictographic}\uFE0F\u200D]/gu, '').replace(/[!:\s]+$/, '').replace(/\s+recipe$/i, '').slice(0, 80);
+    if (!out.title) out.title = l.replace(/[\p{Extended_Pictographic}\uFE0F\u200D]/gu, '').replace(/\s{2,}/g, ' ').replace(/[!:\s]+$/, '').replace(/\s+recipe$/i, '').slice(0, 80);
   }
   return out;
 }

@@ -31,6 +31,7 @@ The real app lives in `app/` and is wrapped as an Android APK with Capacitor. Ev
 - **XP, levels and badges:** cook +50, save +10, your own version +15, first grocery list +5. Seven chef levels and ten badges, with drop-in banners and a level-up celebration. Events (`xp.earned`, `level.up`, `badge.unlocked`) are queued for 128bitlife.
 - **Pixel photos:** a recipe's photo (from the page, pin or TikTok thumbnail) is shrunk into a 96×64 pixel image and stored with the recipe, so it survives expired links and stays tiny.
 - **Testing tools:** "This import went wrong" shares a full report (input, what was found, what was made); Settings has backup/restore to a file, the version number, and an update check against GitHub Releases.
+- **128bit account sync:** Settings › 128bit account signs in with the same email and password as 128bit Play, Tracker and FIT (the "128bit play" Supabase project). Recipes, grocery list, XP, badges, colours and followed boards sync across devices: on open, a few seconds after changes, and on "Sync". The newest edit wins per item, XP and badges merge, and deletions sync. Sharing cooking to the family feed (Tracker's timeline) is a separate switch, off by default. Server setup: run `supabase/bitrecipe-sync.sql` once.
 - **My version:** copies a recipe so you can change it while the original stays untouched.
 - **Colours:** six presets plus a custom colour for every token, with a contrast check and a one-tap "fix readability". The logo recolours with the theme.
 - **Private by default.** Recipes stay on the phone (localStorage). Each recipe keeps its creator, original link and video timestamps.
@@ -66,7 +67,7 @@ Native bits live in `native/android/`: the share-sheet receiver, keep-screen-awa
 
 - Reading **spoken** steps and **on-screen text** from videos. That needs speech-to-text, OCR and an AI pass on a server. For now, TikTok and Reels use the caption, and you can paste anything else.
 - Screenshot and video upload import (same server work).
-- Grocery list across recipes, pantry, meal plans in bitcalendar, family sharing and sync. Events (`recipe.scraped`, `recipe.saved`, `recipe.cooked`) are already queued locally in the `family_events` shape, ready for Supabase sync.
+- Pantry, meal plans in bitcalendar, and Google sign-in (needs a bitrecipe return link added to the Supabase sign-in settings).
 - A signed release APK for the Play Store. CI builds a debug APK.
 
 ## Architecture

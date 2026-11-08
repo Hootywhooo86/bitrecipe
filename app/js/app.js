@@ -11,17 +11,27 @@ import { chef, flame, trophy } from './sprites.js';
 import { XP, levelOf, BADGES, checkBadges } from './badges.js';
 import { pixelPhoto } from './photo.js';
 import { VERSION } from './version.js';
+import { signIn, signUp, signOut, resetPassword, signedIn, accountEmail, api } from './account.js';
+import { syncNow, noteChanges, pushFeed, resetSync } from './sync.js';
 
 // ---------- storage ----------
 const KEY = 'bitrecipe.v1';
 const load = () => { try { return JSON.parse(localStorage.getItem(KEY)) || null; } catch { return null; } };
 const db = load() || { recipes: structuredClone(SAMPLES), theme: { preset: 'tomato', custom: null }, prefs: { system: 'orig', view: 'map' }, events: [], xp: 0 };
-const save = () => { try { localStorage.setItem(KEY, JSON.stringify(db)); } catch { toast('Storage full — could not save'); } };
+const store = () => { try { localStorage.setItem(KEY, JSON.stringify(db)); } catch { toast('Storage full — could not save'); } };
+// Every save also tells sync (shortly after) that something changed.
+let noteT, syncT;
+const save = () => {
+  store();
+  if (!signedIn()) return;
+  clearTimeout(noteT); noteT = setTimeout(() => { noteChanges(db); store(); }, 1200);
+  clearTimeout(syncT); syncT = setTimeout(() => runSync(), 5000);
+};
 save();
 
 // Family event outbox (shared 128bit family_events feed; synced once accounts land).
 function emit(type, payload) {
-  db.events.push({ type, app: 'bitrecipe', at: new Date().toISOString(), payload });
+  db.events.push({ id: `br-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`, type, app: 'bitrecipe', at: new Date().toISOString(), payload });
   db.events = db.events.slice(-200);
   save();
 }
@@ -65,6 +75,25 @@ function toast(msg) {
   document.body.append(t);
   clearTimeout(toastTimer);
   toastTimer = setTimeout(() => t.remove(), 2600);
+}
+
+// ---------- 128bit account sync ----------
+async function runSync(manual = false) {
+  if (!signedIn()) return;
+  session.syncing2 = true;
+  if (location.hash.startsWith('#/settings')) rerender();
+  try {
+    const { pulled, pushed } = await syncNow(db, { save: store });
+    await pushFeed(db).catch(() => {});
+    store();
+    if (pulled) { paint(theme()); if (!session.cook && !['#/review'].includes(location.hash) && !location.hash.startsWith('#/edit')) rerender(); }
+    if (manual) toast(pulled || pushed ? `Synced · ${pulled} in, ${pushed} out` : 'Already up to date');
+  } catch (e) {
+    db.sync ||= {}; db.sync.error = e.message; store();
+    if (manual) toast(e.message);
+  }
+  session.syncing2 = false;
+  if (location.hash.startsWith('#/settings')) rerender();
 }
 
 // ---------- XP, levels, badges ----------
@@ -440,6 +469,22 @@ function settingsView() {
   return `
   <header class="top"><button class="icon-btn" data-back aria-label="Back">◀</button><div class="title">SETTINGS</div></header>
   <main>
+    <div class="panel">
+      <div class="h">☁ 128BIT ACCOUNT</div>
+      ${signedIn() ? `
+        <div class="setrow"><div class="grow"><b>${esc(accountEmail() || 'Signed in')}</b><span class="small muted">${session.syncing2 ? '⟳ Syncing…' : db.sync?.error ? `<span style="color:var(--accent)">${esc(db.sync.error)}</span>` : db.sync?.last ? `Synced ${ago(db.sync.last)} · recipes, list, XP and colours` : 'Not synced yet'}</span></div>
+          <button class="btn alt" id="syncAcc" ${session.syncing2 ? 'disabled' : ''}>SYNC</button></div>
+        <div class="setrow"><div class="grow"><b>Share cooking to my family feed</b><span class="small muted">Recipes you save and cook show up on 128bit Tracker’s timeline. Off until you turn it on.</span></div>
+          <div class="seg-ctl" style="width:120px"><button data-feed="1" class="${db.prefs.shareFeed ? 'on' : ''}">ON</button><button data-feed="0" class="${db.prefs.shareFeed ? '' : 'on'}">OFF</button></div></div>
+        <div class="row" style="margin-top:10px"><button class="btn ghost grow" id="signOut">SIGN OUT</button><button class="btn ghost grow" id="wipeServer">REMOVE FROM SERVER</button></div>`
+      : `
+        <p class="small muted" style="margin-bottom:10px">Sign in with the same account as 128bit Play, Tracker and FIT to keep your recipes, grocery list, XP and colours on all your devices.</p>
+        <input class="field" id="accEmail" type="email" autocomplete="email" placeholder="Email" value="${esc(session.accEmail || '')}" style="margin-bottom:8px">
+        <input class="field" id="accPass" type="password" autocomplete="current-password" placeholder="Password">
+        <div class="row" style="margin-top:10px"><button class="btn grow" id="accIn">SIGN IN</button><button class="btn ghost grow" id="accUp">CREATE ACCOUNT</button></div>
+        <button class="pill" id="accForgot" style="margin-top:10px">Forgot password?</button>
+        <div id="accMsg"></div>`}
+    </div>
     <div class="panel">
       <div class="h">⏱ TIMER ALERTS</div>
       ${!BitNative ? '<p class="small muted">Timer alarms ring through Do Not Disturb in the Android app. In this browser preview they only beep while the page is open.</p>' : !st ? '<p class="small muted">Checking…</p>' : `
@@ -823,7 +868,7 @@ $app.addEventListener('input', (e) => {
 });
 $app.addEventListener('change', (e) => { if (e.target.dataset.color) rerender(); });
 
-$app.addEventListener('click', (e) => {
+$app.addEventListener('click', async (e) => {
   const t = e.target.closest('button, [data-open], [data-have], [data-step], [data-gcheck], a');
   if (!t) return;
   const d = t.dataset;
@@ -966,6 +1011,35 @@ $app.addEventListener('click', (e) => {
   if (d.unboard != null) { db.pinterest.boards.splice(+d.unboard, 1); save(); return rerender(); }
   if (t.id === 'syncNow') return runPinterestSync(true);
   if (t.id === 'checkUpd') return checkUpdate(true);
+  if (['accIn', 'accUp', 'accForgot'].includes(t.id)) {
+    const email = document.getElementById('accEmail').value, pass = document.getElementById('accPass').value;
+    session.accEmail = email;
+    const msg = document.getElementById('accMsg');
+    const say = (text, level = 'info') => { msg.innerHTML = `<div class="flag ${level}" style="margin-top:10px">${esc(text)}</div>`; };
+    t.disabled = true;
+    const work = t.id === 'accIn' ? signIn(email, pass).then(() => 'in')
+      : t.id === 'accUp' ? signUp(email, pass).then((r) => (r === 'confirm' ? 'confirm' : 'in'))
+      : resetPassword(email).then(() => 'reset');
+    return work.then((r) => {
+      if (r === 'confirm') return say('Account made! Check your email for the 128bit confirmation link, then come back and sign in.', 'good');
+      if (r === 'reset') return say('If that email has an account, a reset link is on its way.', 'good');
+      resetSync(db); store();
+      toast('Signed in · syncing');
+      rerender();
+      runSync(true);
+    }).catch((err) => { t.disabled = false; say(err.message, 'bad'); });
+  }
+  if (t.id === 'syncAcc') return runSync(true);
+  if (d.feed) { db.prefs.shareFeed = d.feed === '1'; if (db.prefs.shareFeed) db.prefs.shareFeedFrom = Date.now(); save(); rerender(); if (db.prefs.shareFeed) runSync(); return; }
+  if (t.id === 'signOut') {
+    if (!confirm('Sign out? Your recipes stay on this phone.')) return;
+    await signOut(); resetSync(db); store(); toast('Signed out'); return rerender();
+  }
+  if (t.id === 'wipeServer') {
+    if (!confirm('Remove all your bitrecipe data from the 128bit server? This phone keeps its copy; other devices stop getting updates.')) return;
+    try { const n = await api('rpc/bitrecipe_wipe', { method: 'POST', body: {} }); resetSync(db); store(); toast(`Removed ${n} items from the server`); } catch (err) { toast(err.message); }
+    return rerender();
+  }
   if (t.id === 'backup') return saveBackup();
   if (d.motion) { db.prefs.motion = d.motion === '1'; save(); setMotion(); return rerender(); }
 
@@ -1055,10 +1129,12 @@ setMotion();
 document.addEventListener('visibilitychange', () => {
   if (document.visibilityState !== 'visible') return;
   refreshAlerts();
+  runSync();
   const last = Math.min(...(db.pinterest?.boards || []).map((b) => b.last || 0));
   if (Date.now() - last > 15 * 60000) runPinterestSync();
 });
 setTimeout(() => runPinterestSync(), 1500);
+setTimeout(() => runSync(), 800);
 if (Date.now() - (db.prefs.updateChecked || 0) > 6 * 3600000) setTimeout(() => checkUpdate(), 2500);
 // make pixel photos for any recipe that has an image but no photo yet
 setTimeout(() => db.recipes.filter((r) => r.image && !r.photo && !r.photoFailed).slice(0, 6).forEach(ensurePhoto), 3000);
