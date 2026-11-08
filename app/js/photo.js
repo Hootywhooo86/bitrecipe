@@ -1,8 +1,9 @@
-// Recipe photos, 128-bit style: the image is shrunk to a small pixel grid,
-// limited to a chunky palette, and stored as a tiny PNG (a few KB) so it
-// lasts even when the original link expires and never fills storage.
+// Recipe photos: the real picture, resized to 640px wide and saved as a
+// JPEG (~30 KB) inside the recipe, so it keeps working after the original
+// link expires and still syncs quickly between devices.
 
-const W = 96, H = 64;
+const MAX_W = 640, MAX_H = 480, QUALITY = 0.72;
+export const PHOTO_VERSION = 2; // 1 = old pixel-art photos
 
 async function loadBitmap(url) {
   // Native app: CapacitorHttp fetch gives same-origin bytes (no canvas taint).
@@ -22,23 +23,20 @@ async function loadBitmap(url) {
   });
 }
 
-export async function pixelPhoto(url) {
+export async function makePhoto(url) {
   if (!url) return null;
   try {
     const src = await loadBitmap(url);
-    const c = document.createElement('canvas');
-    c.width = W; c.height = H;
-    const ctx = c.getContext('2d');
     const sw = src.width, sh = src.height;
-    const scale = Math.max(W / sw, H / sh); // cover-crop
-    const cw = W / scale, ch = H / scale;
-    ctx.imageSmoothingEnabled = true;
-    ctx.drawImage(src, (sw - cw) / 2, (sh - ch) / 2, cw, ch, 0, 0, W, H);
-    const d = ctx.getImageData(0, 0, W, H);
-    // posterize to 6 levels per channel for that console palette feel
-    for (let i = 0; i < d.data.length; i += 4) for (let k = 0; k < 3; k++) d.data[i + k] = Math.round(d.data[i + k] / 51) * 51;
-    ctx.putImageData(d, 0, 0);
-    return c.toDataURL('image/png');
+    // centre-crop very tall images (TikTok covers are 9:16) to 4:3, then shrink
+    const cropH = Math.min(sh, sw * 0.75);
+    const scale = Math.min(1, MAX_W / sw, MAX_H / cropH);
+    const c = document.createElement('canvas');
+    c.width = Math.round(sw * scale); c.height = Math.round(cropH * scale);
+    const ctx = c.getContext('2d');
+    ctx.imageSmoothingQuality = 'high';
+    ctx.drawImage(src, 0, (sh - cropH) / 2, sw, cropH, 0, 0, c.width, c.height);
+    return c.toDataURL('image/jpeg', QUALITY);
   } catch {
     return null; // unreadable image: the card just shows no photo
   }

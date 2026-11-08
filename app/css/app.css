@@ -283,9 +283,9 @@ html.calm *, html.calm *::before, html.calm *::after { animation: none !importan
 @keyframes dropOut { to { transform: translate(-50%, -40px); opacity: 0; } }
 
 /* ---------- photos ---------- */
-.thumb { width: 84px; flex-shrink: 0; object-fit: cover; image-rendering: pixelated; border-right: 3px solid var(--edge); }
+.thumb { width: 84px; flex-shrink: 0; object-fit: cover; border-right: 3px solid var(--edge); }
 .hero { margin: 0 -16px 14px; border-top: 3px solid var(--edge); border-bottom: 3px solid var(--edge); }
-.heroimg { display: block; width: 100%; aspect-ratio: 3 / 2; object-fit: cover; image-rendering: pixelated; }
+.heroimg { display: block; width: 100%; aspect-ratio: 4 / 3; object-fit: cover; }
 
 /* ---------- grocery ---------- */
 .rcard { position: relative; }

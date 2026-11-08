@@ -9,7 +9,7 @@ import { resolveBoard, syncBoards } from './pinterest.js';
 import { buildList, listAsText } from './grocery.js';
 import { chef, flame, trophy } from './sprites.js';
 import { XP, levelOf, BADGES, checkBadges } from './badges.js';
-import { pixelPhoto } from './photo.js';
+import { makePhoto, PHOTO_VERSION } from './photo.js';
 import { VERSION } from './version.js';
 import { signIn, signUp, signOut, resetPassword, signedIn, accountEmail, api } from './account.js';
 import { syncNow, noteChanges, pushFeed, resetSync } from './sync.js';
@@ -135,16 +135,17 @@ function levelBar() {
     <div class="xpbar"><i style="width:${pct}%"></i></div><span class="small muted">${L.into}/${L.need} XP to next level · ${db.xp || 0} total</span></button>`;
 }
 
-// Pixel photos: made once from the recipe's image link, stored inline (a few KB).
+// Photos: made once from the recipe's image link, stored inline (~30 KB JPEG).
+// Old pixel-art photos are swapped for real ones when the link still works.
 const photoQueue = new Set();
 async function ensurePhoto(r) {
-  if (!r || r.photo || !r.image || photoQueue.has(r.id) || r.photoFailed) return;
+  if (!r || !r.image || photoQueue.has(r.id) || r.photoFailed || (r.photo && r.photoV === PHOTO_VERSION)) return;
   photoQueue.add(r.id);
-  const data = await pixelPhoto(r.image);
+  const data = await makePhoto(r.image);
   photoQueue.delete(r.id);
   const live = byId(r.id);
   if (!live) return;
-  if (data) live.photo = data; else live.photoFailed = true;
+  if (data) { live.photo = data; live.photoV = PHOTO_VERSION; } else if (!live.photo) live.photoFailed = true; else live.photoV = PHOTO_VERSION; // keep the old one if the link died
   save();
   if (data && (location.hash === '' || location.hash === '#/' || location.hash === '#/r/' + r.id)) rerender();
 }
@@ -295,7 +296,7 @@ function reviewView() {
   <header class="top"><button class="icon-btn" data-back aria-label="Back">◀</button><div class="title">CHECK IT</div></header>
   <main>
     ${session.flags.map((f) => `<div class="flag ${f.level}">${esc(f.text)}</div>`).join('')}
-    ${d.image ? `<p class="hint" style="margin-bottom:10px">📷 Photo found — it gets a pixel makeover when you save.</p>` : ''}
+    ${d.image ? `<p class="hint" style="margin-bottom:10px">📷 Photo found — it’s saved with the recipe.</p>` : ''}
     <div class="panel">
       <label class="lbl">Title</label><input class="field" data-f="title" value="${esc(d.title)}">
       <div class="row">
@@ -1137,6 +1138,6 @@ setTimeout(() => runPinterestSync(), 1500);
 setTimeout(() => runSync(), 800);
 if (Date.now() - (db.prefs.updateChecked || 0) > 6 * 3600000) setTimeout(() => checkUpdate(), 2500);
 // make pixel photos for any recipe that has an image but no photo yet
-setTimeout(() => db.recipes.filter((r) => r.image && !r.photo && !r.photoFailed).slice(0, 6).forEach(ensurePhoto), 3000);
+setTimeout(() => db.recipes.filter((r) => r.image && !r.photoFailed && (!r.photo || r.photoV !== PHOTO_VERSION)).slice(0, 8).forEach(ensurePhoto), 3000);
 
 render();
