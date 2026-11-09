@@ -206,7 +206,7 @@ function openExternal(url) {
   window.open(url, '_blank', 'noopener');
 }
 
-const srcBadge = (s) => `${s?.via === 'pinterest' ? '<span class="src pinterest">PIN</span>' : ''}<span class="src ${esc(s?.platform || 'text')}">${{ tiktok: 'TIKTOK', instagram: 'REELS', web: 'WEB', youtube: 'YT', text: 'TEXT' }[s?.platform] || 'TEXT'}</span>`;
+const srcBadge = (s) => `${s?.via === 'pinterest' ? '<span class="src pinterest">PIN</span>' : ''}<span class="src ${esc(s?.platform || 'text')}">${{ tiktok: 'TIKTOK', instagram: 'REELS', web: 'WEB', youtube: 'YT', text: 'TEXT', mine: 'MINE' }[s?.platform] || 'TEXT'}</span>`;
 
 // ---------- screens ----------
 function libraryView() {
@@ -232,7 +232,7 @@ function libraryView() {
       <div class="h">▶ NEW QUEST</div>
       <p class="small muted" style="margin-bottom:12px">Share a TikTok, Reel or recipe page to bitrecipe — or paste it here.</p>
       <button class="btn block" data-go="#/add">+ ADD A RECIPE</button>
-      <button class="btn alt block" data-go="#/fridge" style="margin-top:10px">🧊 WHAT CAN I MAKE?</button>
+      <div class="row" style="margin-top:10px"><button class="btn ghost grow" id="writeNew">✍ WRITE MY OWN</button><button class="btn alt grow" data-go="#/fridge">🧊 WHAT CAN I MAKE?</button></div>
     </div>
     <div class="row" style="margin-bottom:14px">
       <input class="field grow" id="search" placeholder="Search recipes or ingredients…" value="${esc(session.search || '')}">
@@ -258,7 +258,7 @@ function libraryView() {
           </div>
         </div>
         ${r._shared ? '' : `<button class="cardcart${db.grocery.entries.some((e) => e.rid === r.id) ? ' on' : ''}" data-cart="${esc(r.id)}" aria-label="Add to grocery list">${db.grocery.entries.some((e) => e.rid === r.id) ? '✓' : '🛒'}</button>`}
-      </div>`).join('') : `<div class="empty">${fam ? 'No family recipes yet. Open one of yours and tap 👪 Share to family.' : f === 'all' ? 'Nothing here yet.' : 'No recipes in this collection yet. Open a recipe and add it.'}</div>`}
+      </div>`).join('') : `<div class="empty">${fam ? 'No family recipes yet. Open one of yours and tap 👪 Share to family, or <button class="pill" id="writeNew">✍ write a new one</button>' : f === 'all' ? 'Nothing here yet.' : 'No recipes in this collection yet. Open a recipe and add it.'}</div>`}
     <p class="small muted" style="text-align:center;margin-top:20px">🛒 tap the cart on a recipe to add it to your grocery list</p>
   </main>`;
 }
@@ -301,6 +301,7 @@ function addView() {
       </ul>
       <p class="small muted" style="margin-top:10px">You always get to check everything before saving. Missing amounts are flagged, never guessed. Saved recipes stay private on your phone.</p>
       <button class="btn ghost block" id="trysample" style="margin-top:12px">TRY A SAMPLE CAPTION</button>
+      <button class="btn alt block" id="writeNew" style="margin-top:10px">✍ OR WRITE YOUR OWN FROM SCRATCH</button>
     </div>
   </main>`;
 }
@@ -312,21 +313,29 @@ function reviewView() {
   const laneBtn = (s, l, k) => `<button class="lane-${k + 1}${s.lane === l.id ? ' on' : ''}" data-lane="${esc(s.id)}:${esc(l.id)}">${esc(l.id)}</button>`;
   const joinBtn = (s, l, k) => l.id === s.lane ? '' : `<button class="lane-${k + 1}${(s.merges || []).includes(l.id) ? ' on' : ''}" data-join="${esc(s.id)}:${esc(l.id)}">+ ${esc(l.name)}</button>`;
   return `
-  <header class="top"><button class="icon-btn" data-back aria-label="Back">◀</button><div class="title">CHECK IT</div></header>
+  <header class="top"><button class="icon-btn" data-back aria-label="Back">◀</button><div class="title">${session.writing ? 'WRITE A RECIPE' : session.editing ? 'EDIT RECIPE' : 'CHECK IT'}</div></header>
   <main>
     ${session.flags.map((f) => `<div class="flag ${f.level}">${esc(f.text)}</div>`).join('')}
-    ${d.image ? `<p class="hint" style="margin-bottom:10px">📷 Photo found — it’s saved with the recipe.</p>` : ''}
+    <div class="panel photopick">
+      ${d.photo ? `<img class="heroimg" src="${d.photo}" alt="">` : d.image ? '<p class="hint">📷 Photo found on the page — it’s saved with the recipe.</p>' : '<p class="hint">No photo yet.</p>'}
+      <div class="row" style="margin-top:10px">
+        <label class="btn ghost grow" style="text-align:center">📷 ${d.photo ? 'CHANGE PHOTO' : 'ADD PHOTO'}<input type="file" id="photoIn" accept="image/*" hidden></label>
+        ${d.photo ? '<button class="btn ghost" id="photoOut">✕</button>' : ''}
+      </div>
+    </div>
     <div class="panel">
       <label class="lbl">Title</label><input class="field" data-f="title" value="${esc(d.title)}">
       <div class="row">
         <div class="grow"><label class="lbl">Serves</label><input class="field" type="number" min="1" data-f="servings" value="${esc(d.servings)}"></div>
-        <div class="grow"><label class="lbl">Total minutes</label><input class="field" type="number" min="0" data-f="total" value="${esc(d.time?.total || '')}"></div>
+        <div class="grow"><label class="lbl">Hands-on min</label><input class="field" type="number" min="0" data-f="active" value="${esc(d.time?.active || '')}"></div>
+        <div class="grow"><label class="lbl">Total min</label><input class="field" type="number" min="0" data-f="total" value="${esc(d.time?.total || '')}"></div>
       </div>
       <label class="lbl">Creator / source</label><input class="field" data-f="creator" value="${esc(d.source?.creator || '')}">
       ${d.source?.url ? `<p class="hint">Link kept: ${esc(d.source.url)}</p>` : ''}
     </div>
     <div class="panel">
       <div class="h">INGREDIENTS · ONE PER LINE</div>
+      ${session.writing ? '<p class="hint" style="margin:-4px 0 10px">Type them like you’d say them: “2 cups flour”, “3 cloves garlic, minced”, “salt to taste”. Amounts scale and convert automatically.</p>' : ''}
       ${d.ingredients.map((i, k) => `
         <div class="ed-row${i.missing && i.qty == null ? ' flagged' : ''}">
           <div class="grow"><input class="field" data-ing="${k}" value="${esc(ingLine(i))}">
@@ -343,7 +352,7 @@ function reviewView() {
     </div>
     <div class="panel">
       <div class="h">STEPS</div>
-      <p class="hint" style="margin:-4px 0 10px">[brackets] show where an amount appears — it scales with servings.</p>
+      <p class="hint" style="margin:-4px 0 10px">${session.writing ? 'Just mention an ingredient (“mix the flour and sugar”) and its amount appears in the step. Give a step a timer and mark slow parts as hands-off. Use tracks when two things happen at once.' : '[brackets] show where an amount appears — it scales with servings.'}</p>
       ${d.steps.map((s, k) => `
         <div class="ed-step">
           <div class="row" style="margin-bottom:6px"><span class="sn">${String(k + 1).padStart(2, '0')}</span><span class="grow"></span><button class="x pill" data-delStep="${k}">✕ remove</button></div>
@@ -356,6 +365,7 @@ function reviewView() {
     </div>
     ${d.importDebug && !session.editing ? '<button class="btn ghost block" id="report" style="margin-bottom:18px">🐞 SEND THIS IMPORT TO FIX THE IMPORTER</button>' : ''}
     <div class="panel"><div class="h">PREVIEW</div>${renderLegend(d)}${renderTrackMap(finalize(structuredClone(d), true), { factor: 1, system: 'orig' })}</div>
+  ${signedIn() && (db.family?.books || []).length && !session.editing ? `<div class="panel"><label class="row" style="gap:8px"><input type="checkbox" id="alsoFamily" ${session.alsoFamily ? 'checked' : ''}> <span>Also share to <b>${esc(db.family.books[0].name)}</b> 👪</span></label></div>` : ''}
   </main>
   <div class="dock"><div class="inner"><button class="btn good block" id="saveDraft">✓ SAVE RECIPE</button></div></div>`;
 }
@@ -374,7 +384,8 @@ function syncDraft() {
   d.title = val('[data-f=title]')?.trim() || d.title;
   d.servings = Math.max(1, parseInt(val('[data-f=servings]'), 10) || d.servings);
   const total = parseInt(val('[data-f=total]'), 10);
-  d.time = { ...(d.time || {}), total: total || null };
+  const active = parseInt(val('[data-f=active]'), 10);
+  d.time = { ...(d.time || {}), total: total || null, active: active || null };
   d.source = { ...(d.source || {}), creator: val('[data-f=creator]') ?? d.source?.creator };
   $app.querySelectorAll('[data-ing]').forEach((el) => {
     const k = +el.dataset.ing;
@@ -687,7 +698,7 @@ function badgesView() {
   <main>
     ${levelBar()}
     <div class="badges">${BADGES.map((b) => `<div class="badge${got[b.id] ? ' got' : ''}">${trophy(32)}<b>${esc(b.name)}</b><span>${esc(b.desc)}</span></div>`).join('')}</div>
-    <p class="small muted" style="text-align:center;margin-top:16px">XP: cook a recipe +${XP.cook} · save a recipe +${XP.save} · make your own version +${XP.version} · start a grocery list +${XP.grocery}<br>Level ${L.level}: ${esc(L.title)}</p>
+    <p class="small muted" style="text-align:center;margin-top:16px">XP: cook a recipe +${XP.cook} · save a recipe +${XP.save} · write your own +${XP.write} · make your own version +${XP.version} · start a grocery list +${XP.grocery}<br>Level ${L.level}: ${esc(L.title)}</p>
   </main>`;
 }
 
@@ -936,7 +947,7 @@ async function runImport(input) {
     session.draft = recipe;
     session.flags = flags;
     session.pendingInput = '';
-    session.editing = null;
+    session.editing = null; session.writing = false;
     go('#/review');
   } catch (err) {
     if (box) box.innerHTML = `<div class="flag bad" style="margin-top:12px">${esc(err.message || 'Could not read that.')}</div>`;
@@ -983,7 +994,7 @@ let lastRoute = '';
 let enterT;
 window.addEventListener('hashchange', () => {
   const route = location.hash.split('/')[1] || '';
-  if (!['review', 'edit'].includes(route)) session.editing = null;
+  if (!['review', 'edit'].includes(route)) { session.editing = null; session.writing = false; }
   const keepScroll = route === lastRoute;
   lastRoute = route;
   const y = window.scrollY;
@@ -1030,6 +1041,7 @@ $app.addEventListener('click', async (e) => {
   if (d.go) return go(d.go);
   if (d.open) return go(d.open.startsWith('f:') ? '#/f/' + d.open.slice(2) : '#/r/' + d.open);
   if (d.filter) { session.filter = d.filter; return rerender(); }
+  if (t.id === 'writeNew') return startWriting();
 
   // what can I make
   if (route === 'fridge') {
@@ -1061,8 +1073,11 @@ $app.addEventListener('click', async (e) => {
     if (t.id === 'addStep') { syncDraft(); dr.steps.push({ id: 's' + Date.now().toString(36), lane: dr.steps.at(-1)?.lane || dr.lanes[0].id, text: '', merges: [] }); return rerender(); }
     if (t.id === 'addLane') { syncDraft(); const id = ['A', 'B', 'C'].find((l) => !dr.lanes.some((x) => x.id === l)); dr.lanes.push({ id, name: `Track ${id}` }); return rerender(); }
     if (t.id === 'report') { syncDraft(); return shareOut(importReport(finalize(structuredClone(dr), true)), 'bitrecipe import report'); }
+    if (t.id === 'photoOut') { syncDraft(); delete dr.photo; delete dr.photoV; dr.image = null; return rerender(); }
     if (t.id === 'saveDraft') {
       syncDraft();
+      if (!dr.title || dr.title === 'Untitled recipe') { if (session.writing) { toast('Give your recipe a name first'); document.querySelector('[data-f=title]')?.focus(); return; } }
+      const shareAfter = !!document.getElementById('alsoFamily')?.checked;
       const rec = finalize(structuredClone(dr));
       rec.ingredients.forEach((i) => { delete i.edited; });
       delete rec.needsReview; delete rec.reviewFlags;
@@ -1071,8 +1086,11 @@ $app.addEventListener('click', async (e) => {
       ensurePhoto(rec);
       if (!session.editing) emit('recipe.scraped', { recipeId: rec.id, platform: rec.source?.platform });
       save();
-      session.draft = null; session.editing = null;
-      toast('Saved to your cookbook');
+      const wrote = session.writing;
+      session.draft = null; session.editing = null; session.writing = false;
+      if (wrote) { db.stats.written = (db.stats.written || 0) + 1; setTimeout(() => award(XP.write, 'wrote'), 900); }
+      if (shareAfter && db.family?.books?.[0]) shareToBook(db, db.family.books[0].id, rec).then(() => { save(); toast(`👪 Also shared to ${db.family.books[0].name}`); }).catch((e) => toast(e.message));
+      else toast('Saved to your cookbook');
       return location.replace('#/r/' + rec.id);
     }
   }
@@ -1261,6 +1279,21 @@ document.addEventListener('keydown', (e) => {
   if (e.key === 'Escape') document.getElementById('cookClose')?.click();
 });
 
+function startWriting() {
+  const id = () => Date.now().toString(36) + Math.random().toString(36).slice(2, 5);
+  session.draft = {
+    id: 'r' + id(), title: '', servings: 4, servingsLabel: 'servings', time: { active: null, total: null },
+    source: { platform: 'mine', creator: db.family?.name || '', url: '' },
+    equipment: [], lanes: [{ id: 'A', name: 'Main' }],
+    ingredients: [0, 1, 2].map(() => ({ id: 'i' + id(), qty: null, unit: '', item: '', raw: '', edited: true })),
+    steps: [0, 1].map(() => ({ id: 's' + id(), lane: 'A', text: '', merges: [] })),
+    cooked: 0, created: Date.now(), image: null,
+  };
+  session.flags = [{ level: 'info', text: '✍ Your recipe, your way. Fill in what you know. You can always edit it later.' }];
+  session.editing = null; session.writing = true;
+  go('#/review');
+}
+
 async function shareCard(r) {
   toast('Drawing your recipe card…');
   try {
@@ -1316,6 +1349,17 @@ async function saveBackup() {
   toast('Backup downloaded');
 }
 $app.addEventListener('change', async (e) => {
+  if (e.target.id === 'photoIn' && e.target.files?.[0] && session.draft) {
+    syncDraft();
+    const url = URL.createObjectURL(e.target.files[0]);
+    toast('Adding photo…');
+    const data = await makePhoto(url);
+    URL.revokeObjectURL(url);
+    if (!data) return toast('Couldn’t read that picture');
+    session.draft.photo = data; session.draft.photoV = PHOTO_VERSION; session.draft.image = null;
+    return rerender();
+  }
+  if (e.target.id === 'alsoFamily') { session.alsoFamily = e.target.checked; return; }
   if (e.target.id !== 'restore' || !e.target.files?.[0]) return;
   try {
     const parsed = JSON.parse(await e.target.files[0].text());

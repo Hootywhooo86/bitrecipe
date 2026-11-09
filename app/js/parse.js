@@ -46,7 +46,8 @@ export function cleanLine(line) {
 
 // "2 1/4 cups flour, sifted" -> {qty, qty2, unit, item, prep}
 export function parseIngredientLine(raw) {
-  const line = wordNums(cleanLine(raw));
+  // "pinch of salt" / "dash of hot sauce" mean one pinch / dash
+  const line = wordNums(cleanLine(raw)).replace(/^(pinch|dash|sprig|clove|knob)\b/i, '1 $1');
   if (!line) return null;
   const ing = { id: newId('i'), qty: null, unit: '', item: line, prep: '', raw: line };
   const m = line.match(ING_RE);

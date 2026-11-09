@@ -37,6 +37,7 @@ The real app lives in `app/` and is wrapped as an Android APK with Capacitor. Ev
 - **Family cookbook:** Settings › Family cookbook makes a shared book with a 6-letter code (or joins one). Share any recipe to it with 👪; everyone in the book sees it under the 👪 FAMILY filter and can cook it or save their own copy. Server setup: run `supabase/bitrecipe-family.sql` once.
 - **Share card:** 📤 turns a recipe into a picture (photo, ingredients with amounts, numbered steps, theme colours) to send to anyone.
 - **Hands-free cook mode:** 🎙 listens for "next", "back", "repeat", "start timer", "stop" and "ingredients"; 🔊 reads each step aloud. Uses the phone's own speech recognition and voice.
+- **Write your own:** ✍ on the home or add screen opens a blank recipe. Type ingredients as you'd say them; mentioning one in a step puts its amount there. Add timers, hands-off steps, tracks, and a photo from the camera or gallery. Optionally share it to the family cookbook as you save (+25 XP, "Original Chef" badge).
 - **My version:** copies a recipe so you can change it while the original stays untouched.
 - **Colours:** six presets plus a custom colour for every token, with a contrast check and a one-tap "fix readability". The logo recolours with the theme.
 - **Private by default.** Recipes stay on the phone (localStorage). Each recipe keeps its creator, original link and video timestamps.

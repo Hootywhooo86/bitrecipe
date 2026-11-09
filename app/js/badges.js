@@ -2,7 +2,7 @@
 // few small actions; badges unlock from stats. Both feed 128bitlife later
 // through the family event outbox.
 
-export const XP = { cook: 50, save: 10, version: 15, grocery: 5 };
+export const XP = { cook: 50, save: 10, version: 15, grocery: 5, write: 25 };
 
 export const LEVELS = ['Kitchen Newbie', 'Prep Cook', 'Line Cook', 'Sous Chef', 'Head Chef', 'Executive Chef', 'Pixel Legend'];
 
@@ -18,6 +18,7 @@ export const BADGES = [
   { id: 'cook-5', name: 'Regular', desc: 'Cook 5 times', test: (s) => s.cooks >= 5 },
   { id: 'cook-25', name: 'Kitchen Hero', desc: 'Cook 25 times', test: (s) => s.cooks >= 25 },
   { id: 'collector', name: 'Collector', desc: 'Save 10 recipes', test: (s) => s.saved >= 10 },
+  { id: 'author', name: 'Original Chef', desc: 'Write your own recipe', test: (s) => s.written >= 1 },
   { id: 'remix', name: 'Remixer', desc: 'Make your own version of a recipe', test: (s) => s.versions >= 1 },
   { id: 'pinner', name: 'Pin Master', desc: 'Get a recipe from a Pinterest board', test: (s) => s.pins >= 1 },
   { id: 'tiktok', name: 'Scroll Chef', desc: 'Import a TikTok or Reel', test: (s) => s.videos >= 1 },
@@ -37,6 +38,7 @@ export function statsFrom(db) {
     timers: st.timers || 0,
     lists: st.lists || 0,
     threeTrack: st.threeTrack || 0,
+    written: st.written || 0,
   };
 }
 
