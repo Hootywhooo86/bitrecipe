@@ -38,7 +38,7 @@ open(p, 'w').write(s)
 PY
 fi
 
-if ! grep -q 'TimerReceiver' "$MANIFEST"; then
+if ! grep -q 'RECORD_AUDIO' "$MANIFEST"; then
   # Timer alarms: notification permission, exact alarms, DND access, vibration, and the receiver.
   python3 - "$MANIFEST" <<'PY'
 import sys
@@ -50,6 +50,11 @@ perms = '''
     <uses-permission android:name="android.permission.SCHEDULE_EXACT_ALARM" android:maxSdkVersion="32" />
     <uses-permission android:name="android.permission.ACCESS_NOTIFICATION_POLICY" />
     <uses-permission android:name="android.permission.VIBRATE" />
+    <uses-permission android:name="android.permission.RECORD_AUDIO" />
+    <queries>
+        <intent><action android:name="android.speech.RecognitionService" /></intent>
+        <intent><action android:name="android.intent.action.TTS_SERVICE" /></intent>
+    </queries>
 '''
 receiver = '''
         <receiver android:name=".TimerReceiver" android:exported="false" />

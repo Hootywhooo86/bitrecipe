@@ -9,6 +9,20 @@ import android.content.Context;
 import android.content.Intent;
 import android.graphics.Color;
 import android.net.Uri;
+import android.os.Bundle;
+import android.os.Handler;
+import android.os.Looper;
+import android.speech.RecognitionListener;
+import android.speech.RecognizerIntent;
+import android.speech.SpeechRecognizer;
+import android.speech.tts.TextToSpeech;
+import android.speech.tts.UtteranceProgressListener;
+import android.util.Base64;
+import androidx.core.content.FileProvider;
+import java.io.File;
+import java.io.FileOutputStream;
+import java.util.ArrayList;
+import java.util.Locale;
 import android.os.Build;
 import android.provider.Settings;
 import android.view.Window;
@@ -38,7 +52,10 @@ import com.getcapacitor.annotation.PermissionCallback;
  */
 @CapacitorPlugin(
     name = "BitNative",
-    permissions = { @Permission(alias = "notifications", strings = { Manifest.permission.POST_NOTIFICATIONS }) }
+    permissions = {
+        @Permission(alias = "notifications", strings = { Manifest.permission.POST_NOTIFICATIONS }),
+        @Permission(alias = "microphone", strings = { Manifest.permission.RECORD_AUDIO })
+    }
 )
 public class BitNativePlugin extends Plugin {
     private static String pending = null;
@@ -253,5 +270,150 @@ public class BitNativePlugin extends Plugin {
         } catch (Exception e) {
             call.reject("Could not save: " + e.getMessage());
         }
+    }
+
+    // ---------- share a recipe card image ----------
+
+    @PluginMethod
+    public void shareImage(PluginCall call) {
+        String b64 = call.getString("base64");
+        if (b64 == null) { call.reject("base64 is required"); return; }
+        try {
+            File dir = new File(getContext().getCacheDir(), "share");
+            dir.mkdirs();
+            File f = new File(dir, call.getString("name", "recipe.png").replaceAll("[^A-Za-z0-9._-]", "_"));
+            try (FileOutputStream os = new FileOutputStream(f)) { os.write(Base64.decode(b64, Base64.DEFAULT)); }
+            Uri uri = FileProvider.getUriForFile(getContext(), getContext().getPackageName() + ".fileprovider", f);
+            Intent send = new Intent(Intent.ACTION_SEND);
+            send.setType("image/png");
+            send.putExtra(Intent.EXTRA_STREAM, uri);
+            send.putExtra(Intent.EXTRA_TEXT, call.getString("text", ""));
+            send.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION);
+            Intent chooser = Intent.createChooser(send, call.getString("title", "Share recipe"));
+            chooser.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK | Intent.FLAG_GRANT_READ_URI_PERMISSION);
+            getContext().startActivity(chooser);
+            call.resolve();
+        } catch (Exception e) {
+            call.reject("Could not share the image: " + e.getMessage());
+        }
+    }
+
+    // ---------- hands-free: listen for "next", "back"... and read steps aloud ----------
+
+    private SpeechRecognizer recognizer;
+    private boolean listening = false;
+    private TextToSpeech tts;
+    private boolean ttsReady = false;
+    private String pendingSpeech = null;
+    private final Handler main = new Handler(Looper.getMainLooper());
+
+    @PluginMethod
+    public void startVoice(PluginCall call) {
+        if (getPermissionState("microphone") != PermissionState.GRANTED) {
+            requestPermissionForAlias("microphone", call, "micResult");
+            return;
+        }
+        beginVoice(call);
+    }
+
+    @PermissionCallback
+    private void micResult(PluginCall call) {
+        if (getPermissionState("microphone") == PermissionState.GRANTED) beginVoice(call);
+        else call.reject("bitrecipe needs the microphone to hear “next”.");
+    }
+
+    private void beginVoice(PluginCall call) {
+        if (!SpeechRecognizer.isRecognitionAvailable(getContext())) {
+            call.reject("Voice control isn’t available on this phone.");
+            return;
+        }
+        listening = true;
+        main.post(this::listenOnce);
+        call.resolve();
+    }
+
+    private void listenOnce() {
+        if (!listening) return;
+        if (recognizer == null) {
+            recognizer = SpeechRecognizer.createSpeechRecognizer(getContext());
+            recognizer.setRecognitionListener(new RecognitionListener() {
+                @Override public void onReadyForSpeech(Bundle b) {}
+                @Override public void onBeginningOfSpeech() {}
+                @Override public void onRmsChanged(float v) {}
+                @Override public void onBufferReceived(byte[] bytes) {}
+                @Override public void onEndOfSpeech() {}
+                @Override public void onEvent(int t, Bundle b) {}
+                @Override public void onPartialResults(Bundle b) { emit(b, true); }
+                @Override public void onResults(Bundle b) { emit(b, false); again(); }
+                @Override public void onError(int error) { again(); }
+            });
+        }
+        Intent i = new Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH);
+        i.putExtra(RecognizerIntent.EXTRA_LANGUAGE_MODEL, RecognizerIntent.LANGUAGE_MODEL_FREE_FORM);
+        i.putExtra(RecognizerIntent.EXTRA_PARTIAL_RESULTS, true);
+        i.putExtra(RecognizerIntent.EXTRA_MAX_RESULTS, 3);
+        i.putExtra(RecognizerIntent.EXTRA_CALLING_PACKAGE, getContext().getPackageName());
+        try { recognizer.startListening(i); } catch (Exception e) { again(); }
+    }
+
+    private void again() {
+        if (listening) main.postDelayed(this::listenOnce, 300);
+    }
+
+    private void emit(Bundle b, boolean partial) {
+        ArrayList<String> heard = b.getStringArrayList(SpeechRecognizer.RESULTS_RECOGNITION);
+        if (heard == null || heard.isEmpty()) return;
+        JSObject o = new JSObject();
+        o.put("text", android.text.TextUtils.join(" | ", heard));
+        o.put("partial", partial);
+        notifyListeners("voice", o);
+    }
+
+    @PluginMethod
+    public void stopVoice(PluginCall call) {
+        listening = false;
+        main.post(() -> {
+            if (recognizer != null) { recognizer.destroy(); recognizer = null; }
+        });
+        call.resolve();
+    }
+
+    @PluginMethod
+    public void speak(PluginCall call) {
+        final String text = call.getString("text", "");
+        main.post(() -> {
+            if (tts == null) {
+                pendingSpeech = text;
+                tts = new TextToSpeech(getContext(), status -> {
+                    ttsReady = status == TextToSpeech.SUCCESS;
+                    if (ttsReady) {
+                        tts.setLanguage(Locale.getDefault());
+                        tts.setOnUtteranceProgressListener(new UtteranceProgressListener() {
+                            @Override public void onStart(String id) { notifyListeners("speaking", new JSObject().put("on", true)); }
+                            @Override public void onDone(String id) { notifyListeners("speaking", new JSObject().put("on", false)); }
+                            @Override public void onError(String id) { notifyListeners("speaking", new JSObject().put("on", false)); }
+                        });
+                        if (pendingSpeech != null) tts.speak(pendingSpeech, TextToSpeech.QUEUE_FLUSH, null, "bitrecipe");
+                        pendingSpeech = null;
+                    }
+                });
+            } else if (ttsReady) {
+                tts.speak(text, TextToSpeech.QUEUE_FLUSH, null, "bitrecipe");
+            }
+        });
+        call.resolve();
+    }
+
+    @PluginMethod
+    public void stopSpeaking(PluginCall call) {
+        main.post(() -> { if (tts != null) tts.stop(); });
+        call.resolve();
+    }
+
+    @Override
+    protected void handleOnDestroy() {
+        listening = false;
+        if (recognizer != null) recognizer.destroy();
+        if (tts != null) tts.shutdown();
     }
 }

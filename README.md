@@ -32,6 +32,11 @@ The real app lives in `app/` and is wrapped as an Android APK with Capacitor. Ev
 - **Photos:** a recipe's photo (from the page, pin or TikTok cover) is saved with the recipe as a 640px JPEG (~30 KB), so it survives expired links and syncs quickly.
 - **Testing tools:** "This import went wrong" shares a full report (input, what was found, what was made); Settings has backup/restore to a file, the version number, and an update check against GitHub Releases.
 - **128bit account sync:** Settings › 128bit account signs in with the same email and password as 128bit Play, Tracker and FIT (the "128bit play" Supabase project). Recipes, grocery list, XP, badges, colours and followed boards sync across devices: on open, a few seconds after changes, and on "Sync". The newest edit wins per item, XP and badges merge, and deletions sync. Sharing cooking to the family feed (Tracker's timeline) is a separate switch, off by default. Server setup: run `supabase/bitrecipe-sync.sql` once.
+- **What can I make?** Tap the ingredients you have (salt, pepper, oil and water assumed). Recipes sort by how few things are missing, with a 🛒 button that adds just the missing ones to the grocery list.
+- **Collections and favourites:** ★ favourite any recipe and tag it (Dinner, Dessert, Breakfast, Quick, Baking, Snack or your own); filter chips on the home screen.
+- **Family cookbook:** Settings › Family cookbook makes a shared book with a 6-letter code (or joins one). Share any recipe to it with 👪; everyone in the book sees it under the 👪 FAMILY filter and can cook it or save their own copy. Server setup: run `supabase/bitrecipe-family.sql` once.
+- **Share card:** 📤 turns a recipe into a picture (photo, ingredients with amounts, numbered steps, theme colours) to send to anyone.
+- **Hands-free cook mode:** 🎙 listens for "next", "back", "repeat", "start timer", "stop" and "ingredients"; 🔊 reads each step aloud. Uses the phone's own speech recognition and voice.
 - **My version:** copies a recipe so you can change it while the original stays untouched.
 - **Colours:** six presets plus a custom colour for every token, with a contrast check and a one-tap "fix readability". The logo recolours with the theme.
 - **Private by default.** Recipes stay on the phone (localStorage). Each recipe keeps its creator, original link and video timestamps.

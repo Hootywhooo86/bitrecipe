@@ -23,6 +23,8 @@ const profileOf = (db) => ({
   theme: db.theme,
   prefs: { system: db.prefs.system, view: db.prefs.view, motion: db.prefs.motion },
   pinterest: db.pinterest || { boards: [] },
+  fridge: db.fridge || null,
+  familyName: db.family?.name || '',
 });
 
 function localItems(db) {
@@ -70,6 +72,8 @@ function applyRemote(db, row, localNewer = false) {
     db.stats = stats;
     if (localNewer) return; // keep this phone's newer colours / prefs / boards
     if (d.theme) db.theme = d.theme;
+    if (d.fridge) db.fridge = d.fridge;
+    if (d.familyName) { db.family ||= { books: [], recipes: {}, cursors: {}, name: '' }; db.family.name ||= d.familyName; }
     if (d.prefs) Object.assign(db.prefs, d.prefs);
     if (d.pinterest) {
       const mine = db.pinterest?.boards || [];
