@@ -339,3 +339,5 @@ html.calm *, html.calm *::before, html.calm *::after { animation: none !importan
 .tips { padding-left: 18px; line-height: 1.6; }
 .tips li { margin-bottom: 6px; }
 .src.ai { background: linear-gradient(90deg, var(--lane1), var(--lane3)); color: #120d08; border-color: transparent; }
+.enginecheck { margin-top: 12px; border-top: 2px dashed var(--edge); padding-top: 6px; }
+.enginecheck summary { cursor: pointer; color: var(--ink); }

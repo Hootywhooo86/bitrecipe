@@ -700,6 +700,8 @@ function aiView() {
       <div class="h">AI ENGINE</div>
       <div class="engines">${engBtn('claude', 'CLAUDE', 'best recipes')}${engBtn('gemini', 'GEMINI', 'quick & smart')}${engBtn('groq', 'GROQ', 'super fast')}${engBtn('cerebras', 'CEREBRAS', 'lightning fast')}${engBtn('openrouter', 'OPENROUTER', 'free models')}</div>
       ${eng && !Object.values(eng).some(Boolean) ? '<p class="hint" style="color:var(--accent)">The 128bit server didn’t list any AI engines. <button class="pill" id="aiRecheck">↻ check again</button></p>' : ''}
+      <button class="btn ghost block" id="aiCheck" style="margin-top:12px" ${session.aiChecking ? 'disabled' : ''}>${session.aiChecking ? '🔍 TESTING EACH ENGINE… (UP TO A MINUTE)' : '🔍 CHECK ENGINES'}</button>
+      ${session.aiCheck ? engineReport(session.aiCheck) : ''}
     </div>
     ${busy ? `<div class="loading">${chef(56)}<div class="loadbar"><i></i></div><span class="px small">COOKING UP YOUR RECIPE</span><p class="small muted">${['groq', 'cerebras'].includes(a.engine) ? 'A few seconds…' : a.engine === 'claude' ? 'This takes about 20–40 seconds.' : 'About 10–30 seconds…'}</p></div>`
       : `<button class="btn ai block" id="aiGo">✨ MAKE MY RECIPE</button>`}
@@ -722,6 +724,20 @@ function refreshEngines(force = false) {
     if (r.engines && !r.engines[db.ai.engine]) db.ai.engine = ['claude', 'gemini', 'groq', 'cerebras', 'openrouter'].find((e) => r.engines[e]) || db.ai.engine;
     if (location.hash === '#/ai' && JSON.stringify(r.engines) !== before) rerender();
   }).catch(() => {}).finally(() => { session.aiEnginesBusy = false; });
+}
+
+// Results of "Check engines": a tiny test recipe through every engine that has a key.
+function engineReport(c) {
+  const names = { claude: 'Claude', gemini: 'Gemini', groq: 'Groq', cerebras: 'Cerebras', openrouter: 'OpenRouter' };
+  const rows = Object.entries(names).map(([k, label]) => {
+    const r = c[k] || {};
+    const state = !r.set ? '<span class="muted">no key</span>' : r.ok ? `<b style="color:var(--good)">✓ works</b> · ${(r.ms / 1000).toFixed(1)}s` : '<b style="color:var(--accent)">✗ failed</b>';
+    const detail = r.ok ? `model: ${esc(r.model || '?')}` : r.error ? esc(r.error) : '';
+    return `<div class="setrow"><div class="grow"><b>${label}</b><span class="small muted">${detail}</span></div><span class="small">${state}</span></div>`;
+  }).join('');
+  const gm = c.geminiModels ? `<details class="small" style="margin-top:8px"><summary>Gemini models your key can use (${c.geminiModels.available?.length || 0}) · trying <b>${esc(c.geminiModels.using || '?')}</b> first</summary><p class="muted" style="margin-top:6px">${(c.geminiModels.available || []).map(esc).join(', ') || 'none returned. Check the key in Google AI Studio.'}</p><p class="hint">To force one, add a <b>GEMINI_MODEL</b> secret in Supabase with its name.</p></details>` : '';
+  const or = c.openrouterModels?.trying?.length ? `<p class="hint">OpenRouter free models tried in order: ${c.openrouterModels.trying.map(esc).join(', ')}</p>` : '';
+  return `<div class="enginecheck">${rows}${gm}${or}<p class="hint">Checked ${new Date(c.at).toLocaleTimeString()}. A check doesn’t use your daily AI recipes.</p></div>`;
 }
 
 // AI answer -> editable draft (the same review screen as imports).
@@ -1168,6 +1184,17 @@ $app.addEventListener('click', async (e) => {
     if (d.engine) { keepForm(); db.ai.engine = d.engine; save(); return rerender(); }
     if (t.id === 'aiGo') { keepForm(); save(); return runAI(); }
     if (t.id === 'aiRecheck') { toast('Checking the 128bit server…'); return refreshEngines(true); }
+    if (t.id === 'aiCheck') {
+      keepForm(); session.aiChecking = true; rerender();
+      try {
+        const r = await callFunction('bitrecipe-ai', { check: true }, { timeoutMs: 100000 });
+        session.aiCheck = { ...r.check, at: Date.now() };
+        session.aiEngines = Object.fromEntries(Object.entries(r.check).filter(([, v]) => v && typeof v.set === 'boolean').map(([k, v]) => [k, v.set]));
+        const good = Object.values(r.check).filter((v) => v?.ok).length;
+        toast(good ? `${good} engine${good > 1 ? 's' : ''} working` : 'No engine worked. See the details below');
+      } catch (err) { toast(err.message); }
+      session.aiChecking = false; return rerender();
+    }
   }
 
   // what can I make

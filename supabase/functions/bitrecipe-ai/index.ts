@@ -22,7 +22,9 @@ const OPENROUTER_PREFER = [
   "dots-studio/dots-3-note-preview:free", "particle-ai/particle-1:free",
 ];
 // Gemini: generateContent with a JSON-schema response constraint.
-const GEMINI_MODEL = Deno.env.get("GEMINI_MODEL") ?? "gemini-3.8-flash";
+// Unless GEMINI_MODEL is set, pick the newest stable Flash model this key can use.
+const GEMINI_MODEL = Deno.env.get("GEMINI_MODEL") ?? "";
+const GEMINI_FALLBACK = "gemini-3.8-flash";
 const GEMINI_URL = (m: string) => `https://generativelanguage.googleapis.com/v1beta/models/${m}:generateContent`;
 const DAILY_LIMIT = Number(Deno.env.get("BITRECIPE_AI_DAILY_LIMIT") ?? "25");
 
@@ -301,11 +303,45 @@ function normalize(x: Record<string, unknown>): Recipe {
   return r as Recipe;
 }
 
+// Models this Gemini key can call (generateContent), newest first.
+let gmCache: { at: number; all: string[]; pick: string; ranked: string[] } | null = null;
+async function geminiModels(): Promise<{ all: string[]; pick: string; ranked: string[] }> {
+  if (gmCache && Date.now() - gmCache.at < 6 * 3600_000) return gmCache;
+  let all: string[] = [];
+  try {
+    const res = await fetch("https://generativelanguage.googleapis.com/v1beta/models?pageSize=200", {
+      headers: { "x-goog-api-key": Deno.env.get("GEMINI_API_KEY")! }, signal: AbortSignal.timeout(15_000),
+    });
+    const list = ((await res.json())?.models ?? []) as { name: string; supportedGenerationMethods?: string[] }[];
+    all = list.filter((m) => m.supportedGenerationMethods?.includes("generateContent")).map((m) => m.name.replace(/^models\//, ""));
+  } catch { /* fall back below */ }
+  const ver = (id: string) => (id.match(/(\d+(?:\.\d+)?)/)?.[1] ?? "0").split(".").map(Number);
+  const newer = (a: string, b: string) => { const x = ver(a), y = ver(b); return (y[0] - x[0]) || ((y[1] ?? 0) - (x[1] ?? 0)); };
+  const usable = all.filter((id) => /^gemini-/.test(id) && !/(preview|exp|image|tts|audio|live|embedding|vision|thinking|robotics|computer)/i.test(id));
+  const flash = usable.filter((id) => /flash/.test(id) && !/lite/.test(id)).sort(newer);
+  const ranked = GEMINI_MODEL ? [GEMINI_MODEL] : [...new Set([...flash, ...usable.filter((id) => /flash/.test(id)).sort(newer), ...usable.sort(newer)])];
+  if (!ranked.length) ranked.push(GEMINI_FALLBACK);
+  gmCache = { at: Date.now(), all, pick: ranked[0], ranked };
+  return gmCache;
+}
+
 async function withGemini(prompt: string): Promise<{ recipe: Recipe; model: string }> {
+  const ranked = (await geminiModels()).ranked.slice(0, 3);
+  let last: unknown;
+  for (const model of ranked) {
+    try { return await geminiWith(model, prompt); } catch (e) {
+      last = e;
+      if (!/isn't available/.test((e as Error).message)) throw e; // only a missing model moves on
+    }
+  }
+  throw last;
+}
+
+async function geminiWith(model: string, prompt: string): Promise<{ recipe: Recipe; model: string }> {
   const call = async (strictSchema: boolean) => {
     const system = strictSchema ? SYSTEM : `${SYSTEM}\n\nReply with only a JSON object matching this JSON Schema:\n${JSON.stringify(RECIPE_SCHEMA)}`;
     try {
-      return await fetch(GEMINI_URL(GEMINI_MODEL), {
+      return await fetch(GEMINI_URL(model), {
         method: "POST",
         headers: { "x-goog-api-key": Deno.env.get("GEMINI_API_KEY")!, "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -319,7 +355,9 @@ async function withGemini(prompt: string): Promise<{ recipe: Recipe; model: stri
         }),
         signal: AbortSignal.timeout(120_000),
       });
-    } catch { throw fail(504, "Couldn't reach Gemini. Try again."); }
+    } catch (e) {
+      throw fail(504, (e as Error)?.name === "TimeoutError" ? `Gemini (${model}) took over 2 minutes and was stopped. Try another engine.` : "Couldn't reach Gemini. Try again.");
+    }
   };
   let res = await call(true);
   let json = await res.json().catch(() => null);
@@ -331,7 +369,7 @@ async function withGemini(prompt: string): Promise<{ recipe: Recipe; model: stri
   if (res.status === 401 || res.status === 403 || (res.status === 400 && /api key/i.test(JSON.stringify(json ?? "")))) {
     throw fail(503, "Gemini isn't connected yet (GEMINI_API_KEY secret missing or wrong).");
   }
-  if (res.status === 404) throw fail(502, `Gemini model ${GEMINI_MODEL} isn't available. Set the GEMINI_MODEL secret.`);
+  if (res.status === 404) throw fail(502, `Gemini model ${model} isn't available to this key. Run "Check engines" to see which are.`);
   if (res.status === 429) throw fail(429, "Gemini is busy. Try again in a minute, or switch engines.");
   if (!res.ok) throw fail(502, `Gemini error ${res.status}. Try again.`);
   if (json?.promptFeedback?.blockReason) throw fail(422, "The AI chef can't help with that one. Try asking for a different dish.");
@@ -343,7 +381,7 @@ async function withGemini(prompt: string): Promise<{ recipe: Recipe; model: stri
   const text = (cand?.content?.parts ?? []).map((p: { text?: string }) => p.text ?? "").join("").trim();
   if (!text) throw fail(502, "Gemini didn't send a recipe. Try again.");
   const cleaned = text.replace(/^```(?:json)?\s*|\s*```$/g, "");
-  return { recipe: normalize(JSON.parse(cleaned)), model: json?.modelVersion ?? GEMINI_MODEL };
+  return { recipe: normalize(JSON.parse(cleaned)), model: json?.modelVersion ?? model };
 }
 
 const ENGINES = {
@@ -356,6 +394,44 @@ const ENGINES = {
 const ORDER = ["claude", "gemini", "groq", "cerebras", "openrouter"] as const;
 const configured = () => Object.fromEntries(Object.entries(ENGINES).map(([k, v]) => [k, !!Deno.env.get(v.key)]));
 
+// Short log line per request (engine, model, result, time). Never the prompt.
+const log = (o: Record<string, unknown>) => console.log(JSON.stringify({ fn: "bitrecipe-ai", ...o }));
+
+// "Check engines": a tiny real recipe through each configured engine, in parallel.
+async function checkEngines(): Promise<Record<string, unknown>> {
+  const avail = configured();
+  const test = buildPrompt({ prompt: "plain buttered toast", servings: 1, units: "metric" });
+  const out: Record<string, unknown> = {};
+  await Promise.all(ORDER.map(async (e) => {
+    if (!avail[e]) { out[e] = { set: false }; return; }
+    const t0 = Date.now();
+    try {
+      let timer: ReturnType<typeof setTimeout> | undefined;
+      const { recipe, model } = await Promise.race([
+        ENGINES[e].run(test),
+        new Promise<never>((_, rej) => { timer = setTimeout(() => rej(fail(504, "No answer within 60 seconds")), 60_000); }),
+      ]).finally(() => clearTimeout(timer));
+      out[e] = { set: true, ok: true, ms: Date.now() - t0, model, title: recipe && (recipe as { title?: string }).title };
+    } catch (err) {
+      out[e] = { set: true, ok: false, ms: Date.now() - t0, error: (err as Error).message };
+    }
+    log({ check: e, ok: (out[e] as { ok: boolean }).ok, ms: Date.now() - t0, error: (out[e] as { error?: string }).error });
+  }));
+  if (avail.gemini) {
+    const g = await geminiModels().catch(() => null);
+    out.geminiModels = { using: g?.pick, available: (g?.all ?? []).filter((id) => /^gemini-/.test(id)).slice(0, 40) };
+  }
+  if (avail.openrouter) out.openrouterModels = { trying: (await openRouterModels().catch(() => [])).slice(0, 3) };
+  return out;
+}
+
+async function isUser(auth: string): Promise<boolean> {
+  const res = await fetch(`${Deno.env.get("SUPABASE_URL")}/auth/v1/user`, {
+    headers: { apikey: Deno.env.get("SUPABASE_ANON_KEY")!, Authorization: auth },
+  }).catch(() => null);
+  return !!res?.ok;
+}
+
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") return new Response("ok", { headers: cors });
   if (req.method === "GET") return reply(200, { engines: configured(), limit: DAILY_LIMIT });
@@ -363,6 +439,10 @@ Deno.serve(async (req) => {
   const auth = req.headers.get("Authorization") ?? "";
   let body: Record<string, unknown>;
   try { body = await req.json(); } catch { return reply(400, { error: "Send JSON." }); }
+  if (body.check === true) {
+    if (!(await isUser(auth))) return reply(401, { error: "Sign in to your 128bit account to check the AI engines." });
+    return reply(200, { check: await checkEngines(), limit: DAILY_LIMIT });
+  }
   if (!String(body.prompt ?? "").trim()) return reply(400, { error: "Say what you'd like to make." });
 
   const want = ORDER.find((e) => e === body.engine) ?? "claude";
@@ -375,10 +455,13 @@ Deno.serve(async (req) => {
   try { remaining = await takeQuota(auth); } catch (e) {
     return reply((e as { status?: number }).status ?? 500, { error: (e as Error).message });
   }
+  const t0 = Date.now();
   try {
     const { recipe, model } = await ENGINES[engine].run(buildPrompt(body));
+    log({ engine, model, ok: true, ms: Date.now() - t0 });
     return reply(200, { recipe: tidy(recipe), remaining, engine, model });
   } catch (e) {
+    log({ engine, ok: false, ms: Date.now() - t0, error: (e as Error)?.message?.slice(0, 200) });
     const code = (e as { status?: number }).status;
     if (code) return reply(code, { error: (e as Error).message });
     if (e instanceof SyntaxError) return reply(502, { error: "The recipe came back garbled. Try again." });
