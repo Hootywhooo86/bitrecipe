@@ -162,11 +162,11 @@ function tidy(r: Recipe): Recipe {
 
 const fail = (code: number, message: string) => Object.assign(new Error(message), { status: code });
 
-async function withClaude(prompt: string): Promise<{ recipe: Recipe; model: string }> {
+async function withClaude(prompt: string, pick?: string): Promise<{ recipe: Recipe; model: string }> {
   const client = new Anthropic({ apiKey: Deno.env.get("ANTHROPIC_API_KEY"), timeout: 120_000, maxRetries: 1 });
   try {
     const response = await client.beta.messages.create({
-      model: MODEL,
+      model: pick || MODEL,
       max_tokens: 16000,
       system: SYSTEM,
       messages: [{ role: "user", content: prompt }],
@@ -185,6 +185,7 @@ async function withClaude(prompt: string): Promise<{ recipe: Recipe; model: stri
     if (e instanceof Anthropic.RateLimitError) throw fail(429, "The AI chef is busy. Try again in a minute.");
     if (e instanceof Anthropic.AuthenticationError) throw fail(503, "Claude isn't connected yet (ANTHROPIC_API_KEY secret missing or wrong).");
     if (e instanceof Anthropic.APIConnectionError) throw fail(504, "Couldn't reach Claude. Try again.");
+    if (e instanceof Anthropic.NotFoundError) throw fail(502, `Claude model ${pick || MODEL} isn't available to this key.`);
     if (e instanceof Anthropic.APIError) throw fail(502, `Claude error ${e.status}. Try again.`);
     throw e;
   }
@@ -239,8 +240,8 @@ async function compatEngine(c: Compat, prompt: string): Promise<{ recipe: Recipe
   return { recipe: normalize(JSON.parse(content)), model: json?.model ?? c.model };
 }
 
-const withGroq = (p: string) => compatEngine({ name: "Groq", url: GROQ_URL, key: "GROQ_API_KEY", model: GROQ_MODEL }, p);
-const withCerebras = (p: string) => compatEngine({ name: "Cerebras", url: "https://api.cerebras.ai/v1/chat/completions", key: "CEREBRAS_API_KEY", model: CEREBRAS_MODEL }, p);
+const withGroq = (p: string, m?: string) => compatEngine({ name: "Groq", url: GROQ_URL, key: "GROQ_API_KEY", model: m || GROQ_MODEL }, p);
+const withCerebras = (p: string, m?: string) => compatEngine({ name: "Cerebras", url: "https://api.cerebras.ai/v1/chat/completions", key: "CEREBRAS_API_KEY", model: m || CEREBRAS_MODEL }, p);
 let orCache: { at: number; ids: string[] } | null = null;
 async function openRouterModels(): Promise<string[]> {
   if (OPENROUTER_MODEL) return [OPENROUTER_MODEL];
@@ -258,8 +259,8 @@ async function openRouterModels(): Promise<string[]> {
   orCache = { at: Date.now(), ids };
   return ids;
 }
-async function withOpenRouter(p: string): Promise<{ recipe: Recipe; model: string }> {
-  const models = (await openRouterModels()).slice(0, 3);
+async function withOpenRouter(p: string, m?: string): Promise<{ recipe: Recipe; model: string }> {
+  const models = m ? [m] : (await openRouterModels()).slice(0, 3);
   let last: unknown;
   for (const model of models) {
     try {
@@ -325,7 +326,8 @@ async function geminiModels(): Promise<{ all: string[]; pick: string; ranked: st
   return gmCache;
 }
 
-async function withGemini(prompt: string): Promise<{ recipe: Recipe; model: string }> {
+async function withGemini(prompt: string, m?: string): Promise<{ recipe: Recipe; model: string }> {
+  if (m) return geminiWith(m, prompt);
   const ranked = (await geminiModels()).ranked.slice(0, 3);
   let last: unknown;
   for (const model of ranked) {
@@ -392,30 +394,61 @@ const ENGINES = {
   openrouter: { key: "OPENROUTER_API_KEY", run: withOpenRouter },
 } as const;
 const ORDER = ["claude", "gemini", "groq", "cerebras", "openrouter"] as const;
+type Engine = typeof ORDER[number];
 const configured = () => Object.fromEntries(Object.entries(ENGINES).map(([k, v]) => [k, !!Deno.env.get(v.key)]));
+
+// Text-generation models each engine offers this account, best guesses first.
+const CLAUDE_MODELS = ["claude-opus-5-5", "claude-sonnet-5-5", "claude-haiku-5-5"];
+const SKIP = /(whisper|tts|speech|audio|guard|embed|image|vision|moderation|transcri|realtime|rerank|ocr)/i;
+async function listCompat(url: string, key: string): Promise<string[]> {
+  try {
+    const res = await fetch(url, { headers: { Authorization: `Bearer ${Deno.env.get(key)}` }, signal: AbortSignal.timeout(15_000) });
+    const data = ((await res.json())?.data ?? []) as { id: string; active?: boolean }[];
+    return data.filter((m) => m.active !== false && !SKIP.test(m.id)).map((m) => m.id);
+  } catch { return []; }
+}
+async function modelsFor(engine: Engine): Promise<string[]> {
+  if (engine === "claude") return CLAUDE_MODELS;
+  if (engine === "gemini") return (await geminiModels()).ranked;
+  if (engine === "openrouter") return await openRouterModels();
+  const [current, url, key] = engine === "groq"
+    ? [GROQ_MODEL, "https://api.groq.com/openai/v1/models", "GROQ_API_KEY"]
+    : [CEREBRAS_MODEL, "https://api.cerebras.ai/v1/models", "CEREBRAS_API_KEY"];
+  const all = await listCompat(url, key);
+  // the default first, then bigger / gpt-oss / llama / qwen style chat models
+  const rank = (id: string) => (id === current ? -10 : 0) - (/120b|70b|235b|405b|large|super/i.test(id) ? 3 : 0) - (/gpt-oss|llama|qwen|kimi|deepseek|mistral|gemma/i.test(id) ? 1 : 0);
+  return [...new Set([current, ...all.sort((a, b) => rank(a) - rank(b))])];
+}
+const MODEL_ID = /^[\w.\-/:@]{1,120}$/;
+
+// Try one model with the tiny test recipe.
+async function testModel(engine: Engine, model: string | undefined, test: string, capMs = 60_000) {
+  const t0 = Date.now();
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  try {
+    const { recipe, model: used } = await Promise.race([
+      ENGINES[engine].run(test, model),
+      new Promise<never>((_, rej) => { timer = setTimeout(() => rej(fail(504, `No answer within ${Math.round(capMs / 1000)} seconds`)), capMs); }),
+    ]).finally(() => clearTimeout(timer));
+    return { ok: true, ms: Date.now() - t0, model: used, title: (recipe as { title?: string }).title };
+  } catch (err) {
+    return { ok: false, ms: Date.now() - t0, model, error: (err as Error).message };
+  }
+}
 
 // Short log line per request (engine, model, result, time). Never the prompt.
 const log = (o: Record<string, unknown>) => console.log(JSON.stringify({ fn: "bitrecipe-ai", ...o }));
 
 // "Check engines": a tiny real recipe through each configured engine, in parallel.
-async function checkEngines(): Promise<Record<string, unknown>> {
+async function checkEngines(chosen: Partial<Record<Engine, string>> = {}): Promise<Record<string, unknown>> {
   const avail = configured();
   const test = buildPrompt({ prompt: "plain buttered toast", servings: 1, units: "metric" });
   const out: Record<string, unknown> = {};
   await Promise.all(ORDER.map(async (e) => {
     if (!avail[e]) { out[e] = { set: false }; return; }
-    const t0 = Date.now();
-    try {
-      let timer: ReturnType<typeof setTimeout> | undefined;
-      const { recipe, model } = await Promise.race([
-        ENGINES[e].run(test),
-        new Promise<never>((_, rej) => { timer = setTimeout(() => rej(fail(504, "No answer within 60 seconds")), 60_000); }),
-      ]).finally(() => clearTimeout(timer));
-      out[e] = { set: true, ok: true, ms: Date.now() - t0, model, title: recipe && (recipe as { title?: string }).title };
-    } catch (err) {
-      out[e] = { set: true, ok: false, ms: Date.now() - t0, error: (err as Error).message };
-    }
-    log({ check: e, ok: (out[e] as { ok: boolean }).ok, ms: Date.now() - t0, error: (out[e] as { error?: string }).error });
+    const [r, models] = await Promise.all([testModel(e, chosen[e], test), modelsFor(e).catch(() => [])]);
+    out[e] = { set: true, ...r, models: models.slice(0, 40) };
+    log({ check: e, ok: r.ok, ms: r.ms, model: r.model, error: r.error });
   }));
   if (avail.gemini) {
     const g = await geminiModels().catch(() => null);
@@ -441,7 +474,34 @@ Deno.serve(async (req) => {
   try { body = await req.json(); } catch { return reply(400, { error: "Send JSON." }); }
   if (body.check === true) {
     if (!(await isUser(auth))) return reply(401, { error: "Sign in to your 128bit account to check the AI engines." });
-    return reply(200, { check: await checkEngines(), limit: DAILY_LIMIT });
+    const engine = ORDER.find((e) => e === body.engine);
+    const model = typeof body.model === "string" && MODEL_ID.test(body.model) ? body.model : undefined;
+    const test = buildPrompt({ prompt: "plain buttered toast", servings: 1, units: "metric" });
+    if (engine && !configured()[engine]) return reply(400, { error: "That engine has no key on the server." });
+    // test one model
+    if (engine && model) {
+      const r = await testModel(engine, model, test);
+      log({ check: engine, model, ok: r.ok, ms: r.ms, error: r.error });
+      return reply(200, { engine, result: r });
+    }
+    // find a working model: try the engine's models one by one (about 100 s at most)
+    if (engine && body.scan === true) {
+      const models = (await modelsFor(engine)).filter((m) => m !== body.skip).slice(0, 6);
+      const tried: unknown[] = [];
+      const start = Date.now();
+      for (const m of models) {
+        const left = 100_000 - (Date.now() - start);
+        if (left < 8_000) break;
+        const r = await testModel(engine, m, test, Math.min(40_000, left));
+        tried.push(r);
+        log({ scan: engine, model: m, ok: r.ok, ms: r.ms, error: r.error });
+        if (r.ok) return reply(200, { engine, found: r.model ?? m, tried });
+      }
+      return reply(200, { engine, found: null, tried });
+    }
+    const chosen = (body.models && typeof body.models === "object" ? body.models : {}) as Record<string, unknown>;
+    const picks = Object.fromEntries(ORDER.filter((e) => typeof chosen[e] === "string" && MODEL_ID.test(chosen[e] as string)).map((e) => [e, chosen[e] as string]));
+    return reply(200, { check: await checkEngines(picks), limit: DAILY_LIMIT });
   }
   if (!String(body.prompt ?? "").trim()) return reply(400, { error: "Say what you'd like to make." });
 
@@ -457,7 +517,8 @@ Deno.serve(async (req) => {
   }
   const t0 = Date.now();
   try {
-    const { recipe, model } = await ENGINES[engine].run(buildPrompt(body));
+    const pick = typeof body.model === "string" && MODEL_ID.test(body.model) && engine === want ? body.model : undefined;
+    const { recipe, model } = await ENGINES[engine].run(buildPrompt(body), pick);
     log({ engine, model, ok: true, ms: Date.now() - t0 });
     return reply(200, { recipe: tidy(recipe), remaining, engine, model });
   } catch (e) {

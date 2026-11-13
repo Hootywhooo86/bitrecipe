@@ -24,6 +24,7 @@ const profileOf = (db) => ({
   prefs: { system: db.prefs.system, view: db.prefs.view, motion: db.prefs.motion },
   pinterest: db.pinterest || { boards: [] },
   fridge: db.fridge || null,
+  aiModels: db.ai?.models || {},
   familyName: db.family?.name || '',
 });
 
@@ -73,6 +74,7 @@ function applyRemote(db, row, localNewer = false) {
     if (localNewer) return; // keep this phone's newer colours / prefs / boards
     if (d.theme) db.theme = d.theme;
     if (d.fridge) db.fridge = d.fridge;
+    if (d.aiModels) { db.ai ||= { engine: 'claude', diet: '', servings: 4, time: '', useFridge: false }; db.ai.models = d.aiModels; }
     if (d.familyName) { db.family ||= { books: [], recipes: {}, cursors: {}, name: '' }; db.family.name ||= d.familyName; }
     if (d.prefs) Object.assign(db.prefs, d.prefs);
     if (d.pinterest) {

@@ -341,3 +341,9 @@ html.calm *, html.calm *::before, html.calm *::after { animation: none !importan
 .src.ai { background: linear-gradient(90deg, var(--lane1), var(--lane3)); color: #120d08; border-color: transparent; }
 .enginecheck { margin-top: 12px; border-top: 2px dashed var(--edge); padding-top: 6px; }
 .enginecheck summary { cursor: pointer; color: var(--ink); }
+.engrow { border-bottom: 2px dashed var(--edge); padding-bottom: 10px; margin-bottom: 4px; }
+.engrow .setrow { border-bottom: none; }
+.engrow > .btn { margin: 4px 0 8px; padding: 10px; font-size: 8px; }
+.modelpick { gap: 6px; flex-wrap: nowrap; margin-top: 4px; }
+.modelpick select { padding: 8px; font-size: 13px; min-width: 0; }
+.modelpick .btn { padding: 10px 12px; font-size: 8px; }

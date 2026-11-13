@@ -678,7 +678,7 @@ function aiView() {
   if (!signedIn()) return `
   <header class="top"><button class="icon-btn" data-back aria-label="Back">◀</button><div class="title">AI CHEF</div></header>
   <main><div class="panel empty">${chef(48)}<p style="margin:12px 0">The AI chef works with your 128bit account (it keeps everyone’s AI use fair).</p><button class="btn" data-go="#/settings">SIGN IN</button></div></main>`;
-  const engBtn = (k, label, sub) => `<button data-engine="${k}" class="${a.engine === k ? 'on' : ''}" ${eng && !eng[k] ? 'disabled title="Not set up on the server yet"' : ''}>${label}<small>${sub}</small></button>`;
+  const engBtn = (k, label, sub) => `<button data-engine="${k}" class="${a.engine === k ? 'on' : ''}" ${eng && !eng[k] ? 'disabled title="Not set up on the server yet"' : ''}>${label}<small>${a.models?.[k] ? esc(a.models[k].split('/').pop().replace(/:free$/, '')) : sub}</small></button>`;
   return `
   <header class="top"><button class="icon-btn" data-back aria-label="Back">◀</button><div class="title">✨ AI CHEF</div></header>
   <main>
@@ -729,15 +729,26 @@ function refreshEngines(force = false) {
 // Results of "Check engines": a tiny test recipe through every engine that has a key.
 function engineReport(c) {
   const names = { claude: 'Claude', gemini: 'Gemini', groq: 'Groq', cerebras: 'Cerebras', openrouter: 'OpenRouter' };
+  const picks = db.ai?.models || {};
   const rows = Object.entries(names).map(([k, label]) => {
     const r = c[k] || {};
-    const state = !r.set ? '<span class="muted">no key</span>' : r.ok ? `<b style="color:var(--good)">✓ works</b> · ${(r.ms / 1000).toFixed(1)}s` : '<b style="color:var(--accent)">✗ failed</b>';
-    const detail = r.ok ? `model: ${esc(r.model || '?')}` : r.error ? esc(r.error) : '';
-    return `<div class="setrow"><div class="grow"><b>${label}</b><span class="small muted">${detail}</span></div><span class="small">${state}</span></div>`;
+    if (!r.set) return `<div class="setrow"><div class="grow"><b>${label}</b></div><span class="small muted">no key</span></div>`;
+    const state = r.ok ? `<b style="color:var(--good)">✓ works</b> · ${(r.ms / 1000).toFixed(1)}s` : '<b style="color:var(--accent)">✗ failed</b>';
+    const scan = session.aiScan?.[k];
+    const test = session.aiTest?.[k];
+    const models = r.models || [];
+    const sel = session.aiSel?.[k] || picks[k] || r.model || models[0] || '';
+    return `<div class="engrow">
+      <div class="setrow"><div class="grow"><b>${label}</b><span class="small muted">${r.ok ? `model: ${esc(r.model || '?')}` : esc(r.error || '')}${picks[k] ? ' · <b>your pick</b>' : ''}</span></div><span class="small">${state}</span></div>
+      ${!r.ok ? `<button class="btn alt block" data-scan="${k}" ${scan?.busy ? 'disabled' : ''}>${scan?.busy ? `↻ TRYING ${label.toUpperCase()}’S OTHER MODELS…` : '↻ FIND A WORKING MODEL'}</button>` : ''}
+      ${scan && !scan.busy ? `<p class="hint">${scan.found ? `✓ <b>${esc(scan.found)}</b> works, so ${label} will use it from now on.` : `No ${label} model worked: ${esc((scan.tried || []).map((t) => `${t.model} (${t.error || 'failed'})`).join('; ') || 'none to try')}`}</p>` : ''}
+      ${models.length ? `<div class="row modelpick"><select class="field grow" data-modelsel="${k}">${models.map((m) => `<option value="${esc(m)}" ${m === sel ? 'selected' : ''}>${esc(m)}</option>`).join('')}</select><button class="btn ghost" data-testmodel="${k}" ${test?.busy ? 'disabled' : ''}>${test?.busy ? '…' : 'TEST'}</button></div>` : ''}
+      ${test && !test.busy ? `<p class="hint">${test.ok ? `✓ <b>${esc(test.model)}</b> made a recipe in ${(test.ms / 1000).toFixed(1)}s. <button class="pill" data-usemodel="${k}" data-model="${esc(test.model)}">USE THIS MODEL</button>` : `✗ ${esc(test.model || '')}: ${esc(test.error || 'failed')}`}</p>` : ''}
+      ${picks[k] ? `<button class="pill" data-automodel="${k}">↺ back to automatic (${esc(picks[k])})</button>` : ''}
+    </div>`;
   }).join('');
-  const gm = c.geminiModels ? `<details class="small" style="margin-top:8px"><summary>Gemini models your key can use (${c.geminiModels.available?.length || 0}) · trying <b>${esc(c.geminiModels.using || '?')}</b> first</summary><p class="muted" style="margin-top:6px">${(c.geminiModels.available || []).map(esc).join(', ') || 'none returned. Check the key in Google AI Studio.'}</p><p class="hint">To force one, add a <b>GEMINI_MODEL</b> secret in Supabase with its name.</p></details>` : '';
-  const or = c.openrouterModels?.trying?.length ? `<p class="hint">OpenRouter free models tried in order: ${c.openrouterModels.trying.map(esc).join(', ')}</p>` : '';
-  return `<div class="enginecheck">${rows}${gm}${or}<p class="hint">Checked ${new Date(c.at).toLocaleTimeString()}. A check doesn’t use your daily AI recipes.</p></div>`;
+  const gm = c.geminiModels ? `<details class="small" style="margin-top:8px"><summary>All Gemini models your key can use (${c.geminiModels.available?.length || 0})</summary><p class="muted" style="margin-top:6px">${(c.geminiModels.available || []).map(esc).join(', ') || 'none returned. Check the key in Google AI Studio.'}</p></details>` : '';
+  return `<div class="enginecheck">${rows}${gm}<p class="hint">Checked ${new Date(c.at).toLocaleTimeString()}. Checks and tests don’t use your daily AI recipes.</p></div>`;
 }
 
 // AI answer -> editable draft (the same review screen as imports).
@@ -773,7 +784,7 @@ async function runAI(extra = {}) {
   if (!extra.base) rerender(); else toast('✨ The AI chef is reworking it…');
   try {
     const res = await callFunction('bitrecipe-ai', {
-      prompt, engine: a.engine, servings: extra.base ? undefined : a.servings, time: extra.base ? undefined : a.time,
+      prompt, engine: a.engine, model: a.models?.[a.engine] || undefined, servings: extra.base ? undefined : a.servings, time: extra.base ? undefined : a.time,
       diet: a.diet, units: db.prefs.system === 'orig' ? null : db.prefs.system,
       have: a.useFridge && !extra.base ? db.fridge?.have || [] : [], base: extra.base,
     });
@@ -1184,10 +1195,46 @@ $app.addEventListener('click', async (e) => {
     if (d.engine) { keepForm(); db.ai.engine = d.engine; save(); return rerender(); }
     if (t.id === 'aiGo') { keepForm(); save(); return runAI(); }
     if (t.id === 'aiRecheck') { toast('Checking the 128bit server…'); return refreshEngines(true); }
+    db.ai.models ||= {};
+    const label = (k) => ({ claude: 'Claude', gemini: 'Gemini', groq: 'Groq', cerebras: 'Cerebras', openrouter: 'OpenRouter' })[k];
+    if (d.scan) {
+      const k = d.scan; keepForm();
+      (session.aiScan ||= {})[k] = { busy: true }; rerender();
+      try {
+        const r = await callFunction('bitrecipe-ai', { check: true, engine: k, scan: true }, { timeoutMs: 130000 });
+        session.aiScan[k] = { found: r.found, tried: r.tried };
+        if (r.found) {
+          db.ai.models[k] = r.found; db.ai.engine = k; save();
+          const ok = r.tried.find((t) => t.ok);
+          if (session.aiCheck?.[k]) Object.assign(session.aiCheck[k], { ok: true, model: r.found, ms: ok?.ms || 0, error: null });
+          toast(`✓ ${label(k)} works with ${r.found}`);
+        } else toast(`No ${label(k)} model worked`);
+      } catch (err) { session.aiScan[k] = null; toast(err.message); }
+      return rerender();
+    }
+    if (d.testmodel) {
+      const k = d.testmodel; keepForm();
+      const model = document.querySelector(`[data-modelsel="${k}"]`)?.value;
+      (session.aiSel ||= {})[k] = model;
+      (session.aiTest ||= {})[k] = { busy: true }; rerender();
+      try {
+        const r = await callFunction('bitrecipe-ai', { check: true, engine: k, model }, { timeoutMs: 90000 });
+        session.aiTest[k] = r.result;
+      } catch (err) { session.aiTest[k] = { ok: false, model, error: err.message }; }
+      return rerender();
+    }
+    if (d.usemodel) {
+      db.ai.models[d.usemodel] = d.model; db.ai.engine = d.usemodel; save();
+      if (session.aiCheck?.[d.usemodel]) Object.assign(session.aiCheck[d.usemodel], { ok: true, model: d.model, ms: session.aiTest?.[d.usemodel]?.ms || 0, error: null });
+      session.aiTest[d.usemodel] = null;
+      toast(`${label(d.usemodel)} will use ${d.model}`); return rerender();
+    }
+    if (d.automodel) { delete db.ai.models[d.automodel]; save(); toast(`${label(d.automodel)} back to automatic`); return rerender(); }
     if (t.id === 'aiCheck') {
       keepForm(); session.aiChecking = true; rerender();
       try {
-        const r = await callFunction('bitrecipe-ai', { check: true }, { timeoutMs: 100000 });
+        const r = await callFunction('bitrecipe-ai', { check: true, models: db.ai.models || {} }, { timeoutMs: 100000 });
+        session.aiScan = {}; session.aiTest = {};
         session.aiCheck = { ...r.check, at: Date.now() };
         session.aiEngines = Object.fromEntries(Object.entries(r.check).filter(([, v]) => v && typeof v.set === 'boolean').map(([k, v]) => [k, v.set]));
         const good = Object.values(r.check).filter((v) => v?.ok).length;
