@@ -699,13 +699,29 @@ function aiView() {
     <div class="panel">
       <div class="h">AI ENGINE</div>
       <div class="engines">${engBtn('claude', 'CLAUDE', 'best recipes')}${engBtn('gemini', 'GEMINI', 'quick & smart')}${engBtn('groq', 'GROQ', 'super fast')}${engBtn('cerebras', 'CEREBRAS', 'lightning fast')}${engBtn('openrouter', 'OPENROUTER', 'free models')}</div>
-      ${eng && !Object.values(eng).some(Boolean) ? '<p class="hint" style="color:var(--accent)">No AI engine is connected on the 128bit server yet.</p>' : ''}
+      ${eng && !Object.values(eng).some(Boolean) ? '<p class="hint" style="color:var(--accent)">The 128bit server didn’t list any AI engines. <button class="pill" id="aiRecheck">↻ check again</button></p>' : ''}
     </div>
     ${busy ? `<div class="loading">${chef(56)}<div class="loadbar"><i></i></div><span class="px small">COOKING UP YOUR RECIPE</span><p class="small muted">${['groq', 'cerebras'].includes(a.engine) ? 'A few seconds…' : a.engine === 'claude' ? 'This takes about 20–40 seconds.' : 'About 10–30 seconds…'}</p></div>`
       : `<button class="btn ai block" id="aiGo">✨ MAKE MY RECIPE</button>`}
     <div id="aiMsg">${session.aiError ? `<div class="flag bad" style="margin-top:12px">${esc(session.aiError)}</div>` : ''}</div>
     <p class="small muted" style="text-align:center;margin-top:14px">You check and edit every AI recipe before it’s saved. AI can get things wrong, so trust your nose.</p>
   </main>`;
+}
+
+// Ask the server which engines have keys. Re-checked every time AI Chef opens
+// (at most every 15 s), so keys added on the server show up without a restart.
+let enginesAt = 0;
+function refreshEngines(force = false) {
+  if (!signedIn() || session.aiEnginesBusy || (!force && Date.now() - enginesAt < 15000)) return;
+  session.aiEnginesBusy = true;
+  callFunction('bitrecipe-ai', null, { method: 'GET' }).then((r) => {
+    enginesAt = Date.now();
+    const before = JSON.stringify(session.aiEngines);
+    session.aiEngines = r.engines;
+    db.ai ||= { engine: 'claude', diet: '', servings: 4, time: '', useFridge: false };
+    if (r.engines && !r.engines[db.ai.engine]) db.ai.engine = ['claude', 'gemini', 'groq', 'cerebras', 'openrouter'].find((e) => r.engines[e]) || db.ai.engine;
+    if (location.hash === '#/ai' && JSON.stringify(r.engines) !== before) rerender();
+  }).catch(() => {}).finally(() => { session.aiEnginesBusy = false; });
 }
 
 // AI answer -> editable draft (the same review screen as imports).
@@ -756,6 +772,7 @@ async function runAI(extra = {}) {
     go('#/review');
   } catch (e) {
     session.aiBusy = false; session.aiError = e.message;
+    refreshEngines(true);
     if (extra.base) toast(e.message); else rerender();
   }
 }
@@ -1070,7 +1087,7 @@ function render() {
   else if (route === 'theme') html = themeView();
   else if (route === 'list') html = listView();
   else if (route === 'fridge') html = fridgeView();
-  else if (route === 'ai') { html = aiView(); if (signedIn() && !session.aiEngines) callFunction('bitrecipe-ai', null, { method: 'GET' }).then((r) => { session.aiEngines = r.engines; if (db.ai && r.engines && !r.engines[db.ai.engine]) db.ai.engine = ['claude', 'gemini', 'groq', 'cerebras', 'openrouter'].find((e) => r.engines[e]) || 'claude'; if (location.hash === '#/ai') rerender(); }).catch(() => {}); }
+  else if (route === 'ai') { html = aiView(); refreshEngines(); }
   else if (route === 'f' && findFamilyRecipe(db, arg)) html = recipeView(findFamilyRecipe(db, arg));
   else if (route === 'badges') html = badgesView();
   else if (route === 'settings') { html = settingsView(); if (!session.alerts) refreshAlerts(); }
@@ -1150,6 +1167,7 @@ $app.addEventListener('click', async (e) => {
     if (d.idea) { keepForm(); session.aiPrompt = d.idea; return rerender(); }
     if (d.engine) { keepForm(); db.ai.engine = d.engine; save(); return rerender(); }
     if (t.id === 'aiGo') { keepForm(); save(); return runAI(); }
+    if (t.id === 'aiRecheck') { toast('Checking the 128bit server…'); return refreshEngines(true); }
   }
 
   // what can I make
