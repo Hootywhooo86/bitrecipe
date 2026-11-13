@@ -105,6 +105,7 @@ async function runSync(manual = false) {
 
 // ---------- XP, levels, badges ----------
 db.stats ||= {};
+if (!db.prefs.aiOrder2) { db.prefs.aiOrder2 = true; if (db.ai) db.ai.engine = 'gemini'; }
 db.grocery ||= { entries: [], manual: [], checked: {} };
 function award(xp, why) {
   const before = levelOf(db.xp || 0).level;
@@ -672,7 +673,7 @@ function fridgeView() {
 // ---------- AI chef ----------
 const AI_IDEAS = ['Quick weeknight pasta', 'Use up ripe bananas', 'High-protein breakfast', 'Kid-friendly dinner', 'One-pan chicken', 'Vegan curry', 'Easy birthday cake', 'Meal-prep lunches'];
 function aiView() {
-  const a = (db.ai ||= { engine: 'claude', diet: '', servings: 4, time: '', useFridge: false });
+  const a = (db.ai ||= { engine: 'gemini', diet: '', servings: 4, time: '', useFridge: false });
   const eng = session.aiEngines;
   const busy = session.aiBusy;
   if (!signedIn()) return `
@@ -698,7 +699,8 @@ function aiView() {
     </div>
     <div class="panel">
       <div class="h">AI ENGINE</div>
-      <div class="engines">${engBtn('claude', 'CLAUDE', 'best recipes')}${engBtn('gemini', 'GEMINI', 'quick & smart')}${engBtn('groq', 'GROQ', 'super fast')}${engBtn('cerebras', 'CEREBRAS', 'lightning fast')}${engBtn('openrouter', 'OPENROUTER', 'free models')}</div>
+      <div class="engines">${engBtn('gemini', 'GEMINI', 'first choice')}${engBtn('openrouter', 'OPENROUTER', 'free models')}${engBtn('groq', 'GROQ', 'super fast')}${engBtn('cerebras', 'CEREBRAS', 'lightning fast')}${engBtn('claude', 'CLAUDE', 'best recipes')}</div>
+      ${a.engine === 'gemini' && eng?.openrouter ? '<p class="hint">If Gemini fails, OpenRouter’s free models take over automatically.</p>' : ''}
       ${eng && !Object.values(eng).some(Boolean) ? '<p class="hint" style="color:var(--accent)">The 128bit server didn’t list any AI engines. <button class="pill" id="aiRecheck">↻ check again</button></p>' : ''}
       <button class="btn ghost block" id="aiCheck" style="margin-top:12px" ${session.aiChecking ? 'disabled' : ''}>${session.aiChecking ? '🔍 TESTING EACH ENGINE… (UP TO A MINUTE)' : '🔍 CHECK ENGINES'}</button>
       ${session.aiCheck ? engineReport(session.aiCheck) : ''}
@@ -720,15 +722,15 @@ function refreshEngines(force = false) {
     enginesAt = Date.now();
     const before = JSON.stringify(session.aiEngines);
     session.aiEngines = r.engines;
-    db.ai ||= { engine: 'claude', diet: '', servings: 4, time: '', useFridge: false };
-    if (r.engines && !r.engines[db.ai.engine]) db.ai.engine = ['claude', 'gemini', 'groq', 'cerebras', 'openrouter'].find((e) => r.engines[e]) || db.ai.engine;
+    db.ai ||= { engine: 'gemini', diet: '', servings: 4, time: '', useFridge: false };
+    if (r.engines && !r.engines[db.ai.engine]) db.ai.engine = ['gemini', 'openrouter', 'groq', 'cerebras', 'claude'].find((e) => r.engines[e]) || db.ai.engine;
     if (location.hash === '#/ai' && JSON.stringify(r.engines) !== before) rerender();
   }).catch(() => {}).finally(() => { session.aiEnginesBusy = false; });
 }
 
 // Results of "Check engines": a tiny test recipe through every engine that has a key.
 function engineReport(c) {
-  const names = { claude: 'Claude', gemini: 'Gemini', groq: 'Groq', cerebras: 'Cerebras', openrouter: 'OpenRouter' };
+  const names = { gemini: 'Gemini', openrouter: 'OpenRouter', groq: 'Groq', cerebras: 'Cerebras', claude: 'Claude' };
   const picks = db.ai?.models || {};
   const rows = Object.entries(names).map(([k, label]) => {
     const r = c[k] || {};
@@ -784,7 +786,7 @@ async function runAI(extra = {}) {
   if (!extra.base) rerender(); else toast('✨ The AI chef is reworking it…');
   try {
     const res = await callFunction('bitrecipe-ai', {
-      prompt, engine: a.engine, model: a.models?.[a.engine] || undefined, servings: extra.base ? undefined : a.servings, time: extra.base ? undefined : a.time,
+      prompt, engine: a.engine, model: a.models?.[a.engine] || undefined, models: a.models || {}, servings: extra.base ? undefined : a.servings, time: extra.base ? undefined : a.time,
       diet: a.diet, units: db.prefs.system === 'orig' ? null : db.prefs.system,
       have: a.useFridge && !extra.base ? db.fridge?.have || [] : [], base: extra.base,
     });
@@ -792,6 +794,7 @@ async function runAI(extra = {}) {
     session.draft = draft; session.editing = null; session.writing = false;
     session.flags = [
       { level: 'good', text: `✨ Made by the AI chef (${{ claude: 'Claude', groq: 'Groq', gemini: 'Gemini', cerebras: 'Cerebras', openrouter: 'OpenRouter' }[res.engine] || 'AI'}). Check it over, change anything you like, then save.` },
+      ...(res.backupFor ? [{ level: 'warn', text: `${{ gemini: 'Gemini' }[res.backupFor] || res.backupFor} didn’t manage it (${res.firstError || 'no answer'}), so OpenRouter’s free model ${res.model} made this one.` }] : []),
       ...(typeof res.remaining === 'number' ? [{ level: 'info', text: `${res.remaining} AI recipe${res.remaining === 1 ? '' : 's'} left today.` }] : []),
     ];
     db.stats.ai = (db.stats.ai || 0) + 1; save();
@@ -1183,7 +1186,7 @@ $app.addEventListener('click', async (e) => {
   if (d.filter) { session.filter = d.filter; return rerender(); }
   if (t.id === 'writeNew') return startWriting();
   if (route === 'ai') {
-    db.ai ||= { engine: 'claude', diet: '', servings: 4, time: '', useFridge: false };
+    db.ai ||= { engine: 'gemini', diet: '', servings: 4, time: '', useFridge: false };
     const keepForm = () => {
       session.aiPrompt = document.getElementById('aiPrompt')?.value ?? session.aiPrompt;
       db.ai.servings = Math.max(1, parseInt(document.getElementById('aiServ')?.value, 10) || db.ai.servings);
@@ -1312,7 +1315,7 @@ $app.addEventListener('click', async (e) => {
     if (t.id === 'shareCard') return shareCard(r);
     if (t.id === 'aiTweak') {
       if (!signedIn()) { toast('Sign in to your 128bit account to use the AI chef'); return go('#/settings'); }
-      db.ai ||= { engine: 'claude', diet: '', servings: 4, time: '', useFridge: false };
+      db.ai ||= { engine: 'gemini', diet: '', servings: 4, time: '', useFridge: false };
       const ask = prompt('How should the AI chef change this recipe?\n(e.g. make it vegetarian, double the sauce, no oven, gluten-free)');
       if (!ask?.trim()) return;
       const base = { title: r.title, servings: r.servings, ingredients: r.ingredients.map((i) => ({ id: i.id, qty: i.qty, qty2: i.qty2 ?? null, unit: i.unit, item: i.item, prep: i.prep || '', loose: i.loose || null })), lanes: r.lanes, steps: r.steps.map((s) => ({ lane: s.lane, text: s.text, merges: s.merges || [], timer: s.timer || null, wait: !!s.wait })), tips: r.tips || [] };

@@ -1,5 +1,6 @@
 // bitrecipe AI chef: "what do you want to make?" in, a bitrecipe-format recipe out.
-// Engines, picked in the app: Claude (best quality), Gemini, Groq, Cerebras, OpenRouter.
+// Engines, in the app's order: Gemini (default), OpenRouter free models, Groq, Cerebras, Claude.
+// If Gemini fails, the request automatically moves on to OpenRouter's free models.
 //
 // The API keys live only here, as Edge Function secrets (any of them):
 // ANTHROPIC_API_KEY, GEMINI_API_KEY, GROQ_API_KEY, CEREBRAS_API_KEY, OPENROUTER_API_KEY. The app calls this function with the signed-in 128bit
@@ -393,7 +394,9 @@ const ENGINES = {
   cerebras: { key: "CEREBRAS_API_KEY", run: withCerebras },
   openrouter: { key: "OPENROUTER_API_KEY", run: withOpenRouter },
 } as const;
-const ORDER = ["claude", "gemini", "groq", "cerebras", "openrouter"] as const;
+const ORDER = ["gemini", "openrouter", "groq", "cerebras", "claude"] as const;
+// Where a failed request goes next (only engines that have a key are used).
+const BACKUP: Partial<Record<string, string>> = { gemini: "openrouter" };
 type Engine = typeof ORDER[number];
 const configured = () => Object.fromEntries(Object.entries(ENGINES).map(([k, v]) => [k, !!Deno.env.get(v.key)]));
 
@@ -433,6 +436,20 @@ async function testModel(engine: Engine, model: string | undefined, test: string
     return { ok: true, ms: Date.now() - t0, model: used, title: (recipe as { title?: string }).title };
   } catch (err) {
     return { ok: false, ms: Date.now() - t0, model, error: (err as Error).message };
+  }
+}
+
+// Run one engine with a time cap; never throws.
+async function testLike(engine: Engine, model: string | undefined, prompt: string, capMs: number) {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  try {
+    const { recipe, model: used } = await Promise.race([
+      ENGINES[engine].run(prompt, model),
+      new Promise<never>((_, rej) => { timer = setTimeout(() => rej(fail(504, `${engine} took too long.`)), Math.max(5_000, capMs)); }),
+    ]).finally(() => clearTimeout(timer));
+    return { ok: true as const, recipe, model: used };
+  } catch (err) {
+    return { ok: false as const, err, error: (err as Error).message, status: (err as { status?: number }).status };
   }
 }
 
@@ -505,7 +522,7 @@ Deno.serve(async (req) => {
   }
   if (!String(body.prompt ?? "").trim()) return reply(400, { error: "Say what you'd like to make." });
 
-  const want = ORDER.find((e) => e === body.engine) ?? "claude";
+  const want = ORDER.find((e) => e === body.engine) ?? "gemini";
   const avail = configured();
   // use the engine asked for; if it isn't set up, use whichever one is
   const engine = avail[want] ? want : ORDER.find((e) => avail[e]) ?? null;
@@ -516,13 +533,28 @@ Deno.serve(async (req) => {
     return reply((e as { status?: number }).status ?? 500, { error: (e as Error).message });
   }
   const t0 = Date.now();
+  const prompt = buildPrompt(body);
+  const pick = typeof body.model === "string" && MODEL_ID.test(body.model) && engine === want ? body.model : undefined;
+  const backup = BACKUP[engine] && avail[BACKUP[engine]!] && body.noBackup !== true ? (BACKUP[engine] as Engine) : null;
   try {
-    const pick = typeof body.model === "string" && MODEL_ID.test(body.model) && engine === want ? body.model : undefined;
-    const { recipe, model } = await ENGINES[engine].run(buildPrompt(body), pick);
-    log({ engine, model, ok: true, ms: Date.now() - t0 });
-    return reply(200, { recipe: tidy(recipe), remaining, engine, model });
+    // with a backup engine, give the first engine 70 s so both fit in the time limit
+    const first = await testLike(engine, pick, prompt, backup ? 70_000 : 140_000);
+    if (first.ok) {
+      log({ engine, model: first.model, ok: true, ms: Date.now() - t0 });
+      return reply(200, { recipe: tidy(first.recipe!), remaining, engine, model: first.model });
+    }
+    log({ engine, model: pick, ok: false, ms: Date.now() - t0, error: first.error?.slice(0, 200) });
+    // refusals and key problems shouldn't hop engines; anything else falls back once
+    if (!backup || first.status === 422 || first.status === 401) throw first.err;
+    const bm = body.models && typeof body.models === "object" ? (body.models as Record<string, unknown>)[backup] : undefined;
+    const second = await testLike(backup, typeof bm === "string" && MODEL_ID.test(bm) ? bm : undefined, prompt, 140_000 - (Date.now() - t0));
+    if (!second.ok) {
+      log({ engine: backup, ok: false, ms: Date.now() - t0, error: second.error?.slice(0, 200) });
+      throw fail(502, `${first.error} Then the backup (${backup}) failed too: ${second.error}`);
+    }
+    log({ engine: backup, model: second.model, ok: true, ms: Date.now() - t0, backupFor: engine });
+    return reply(200, { recipe: tidy(second.recipe!), remaining, engine: backup, model: second.model, backupFor: engine, firstError: first.error });
   } catch (e) {
-    log({ engine, ok: false, ms: Date.now() - t0, error: (e as Error)?.message?.slice(0, 200) });
     const code = (e as { status?: number }).status;
     if (code) return reply(code, { error: (e as Error).message });
     if (e instanceof SyntaxError) return reply(502, { error: "The recipe came back garbled. Try again." });
