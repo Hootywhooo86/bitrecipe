@@ -19,6 +19,7 @@ export const BADGES = [
   { id: 'cook-25', name: 'Kitchen Hero', desc: 'Cook 25 times', test: (s) => s.cooks >= 25 },
   { id: 'collector', name: 'Collector', desc: 'Save 10 recipes', test: (s) => s.saved >= 10 },
   { id: 'author', name: 'Original Chef', desc: 'Write your own recipe', test: (s) => s.written >= 1 },
+  { id: 'ai', name: 'AI Sous Chef', desc: 'Make a recipe with the AI chef', test: (s) => s.ai >= 1 },
   { id: 'remix', name: 'Remixer', desc: 'Make your own version of a recipe', test: (s) => s.versions >= 1 },
   { id: 'pinner', name: 'Pin Master', desc: 'Get a recipe from a Pinterest board', test: (s) => s.pins >= 1 },
   { id: 'tiktok', name: 'Scroll Chef', desc: 'Import a TikTok or Reel', test: (s) => s.videos >= 1 },
@@ -39,6 +40,7 @@ export function statsFrom(db) {
     lists: st.lists || 0,
     threeTrack: st.threeTrack || 0,
     written: st.written || 0,
+    ai: db.recipes.filter((r) => r.source?.platform === 'ai').length,
   };
 }
 

@@ -11,7 +11,7 @@ import { chef, flame, trophy } from './sprites.js';
 import { XP, levelOf, BADGES, checkBadges } from './badges.js';
 import { makePhoto, PHOTO_VERSION } from './photo.js';
 import { VERSION } from './version.js';
-import { signIn, signUp, signOut, resetPassword, signedIn, accountEmail, api } from './account.js';
+import { signIn, signUp, signOut, resetPassword, signedIn, accountEmail, api, callFunction } from './account.js';
 import { syncNow, noteChanges, pushFeed, resetSync } from './sync.js';
 import { familyRecipes, findFamilyRecipe, refreshBooks, createBook, joinBook, leaveBook, shareToBook, unshare, pullBooks } from './family.js';
 import { recipeCard, plainStep } from './card.js';
@@ -206,7 +206,7 @@ function openExternal(url) {
   window.open(url, '_blank', 'noopener');
 }
 
-const srcBadge = (s) => `${s?.via === 'pinterest' ? '<span class="src pinterest">PIN</span>' : ''}<span class="src ${esc(s?.platform || 'text')}">${{ tiktok: 'TIKTOK', instagram: 'REELS', web: 'WEB', youtube: 'YT', text: 'TEXT', mine: 'MINE' }[s?.platform] || 'TEXT'}</span>`;
+const srcBadge = (s) => `${s?.via === 'pinterest' ? '<span class="src pinterest">PIN</span>' : ''}<span class="src ${esc(s?.platform || 'text')}">${{ tiktok: 'TIKTOK', instagram: 'REELS', web: 'WEB', youtube: 'YT', text: 'TEXT', mine: 'MINE', ai: 'AI CHEF' }[s?.platform] || 'TEXT'}</span>`;
 
 // ---------- screens ----------
 function libraryView() {
@@ -232,6 +232,7 @@ function libraryView() {
       <div class="h">▶ NEW QUEST</div>
       <p class="small muted" style="margin-bottom:12px">Share a TikTok, Reel or recipe page to bitrecipe — or paste it here.</p>
       <button class="btn block" data-go="#/add">+ ADD A RECIPE</button>
+      <button class="btn ai block" data-go="#/ai" style="margin-top:10px">✨ AI CHEF: MAKE ME A RECIPE</button>
       <div class="row" style="margin-top:10px"><button class="btn ghost grow" id="writeNew">✍ WRITE MY OWN</button><button class="btn alt grow" data-go="#/fridge">🧊 WHAT CAN I MAKE?</button></div>
     </div>
     <div class="row" style="margin-bottom:14px">
@@ -473,6 +474,8 @@ function recipeView(r) {
       <button class="btn alt block" id="toList" style="margin-top:12px">🛒 ${db.grocery.entries.some((e) => e.rid === r.id) ? 'UPDATE LIST' : 'ADD MISSING TO LIST'}${have.size ? ` · ${r.ingredients.filter((i) => !have.has(i.id)).length} ITEMS` : ''}</button>
     </div>
 
+    ${r.tips?.length ? `<div class="panel"><div class="h">✨ CHEF’S TIPS</div><ul class="tips">${r.tips.map((t) => `<li>${esc(t)}</li>`).join('')}</ul></div>` : ''}
+
     <div class="panel">
       <div class="row" style="justify-content:space-between;margin-bottom:12px">
         <div class="h" style="margin:0">METHOD</div>
@@ -487,6 +490,7 @@ function recipeView(r) {
 
     <div class="row" style="margin-bottom:10px">
       <button class="btn ghost grow" id="shareCard">📤 SHARE CARD</button>
+      <button class="btn ghost grow" id="aiTweak">✨ AI TWEAK</button>
       ${shared ? '<button class="btn good grow" id="saveShared">⬇ SAVE TO MY COOKBOOK</button>' : signedIn() && books.length ? '<button class="btn ghost grow" id="toFamily">👪 SHARE TO FAMILY</button>' : ''}
     </div>
     ${shared ? '' : `<div class="row">
@@ -663,6 +667,97 @@ function fridgeView() {
         ${missing.length && !r._shared ? `<button class="cardcart" data-cartmissing="${esc(r.id)}" aria-label="Add missing to grocery list">🛒</button>` : ''}
       </div>`).join('') : '<div class="empty">No recipes use those ingredients yet.</div>'}
   </main>`;
+}
+
+// ---------- AI chef ----------
+const AI_IDEAS = ['Quick weeknight pasta', 'Use up ripe bananas', 'High-protein breakfast', 'Kid-friendly dinner', 'One-pan chicken', 'Vegan curry', 'Easy birthday cake', 'Meal-prep lunches'];
+function aiView() {
+  const a = (db.ai ||= { engine: 'claude', diet: '', servings: 4, time: '', useFridge: false });
+  const eng = session.aiEngines;
+  const busy = session.aiBusy;
+  if (!signedIn()) return `
+  <header class="top"><button class="icon-btn" data-back aria-label="Back">◀</button><div class="title">AI CHEF</div></header>
+  <main><div class="panel empty">${chef(48)}<p style="margin:12px 0">The AI chef works with your 128bit account (it keeps everyone’s AI use fair).</p><button class="btn" data-go="#/settings">SIGN IN</button></div></main>`;
+  const engBtn = (k, label, sub) => `<button data-engine="${k}" class="${a.engine === k ? 'on' : ''}" ${eng && !eng[k] ? 'disabled title="Not set up on the server yet"' : ''}>${label}<small>${sub}</small></button>`;
+  return `
+  <header class="top"><button class="icon-btn" data-back aria-label="Back">◀</button><div class="title">✨ AI CHEF</div></header>
+  <main>
+    <div class="panel">
+      <div class="h">WHAT DO YOU WANT TO MAKE?</div>
+      <textarea class="field" id="aiPrompt" placeholder="e.g. cosy chicken soup with what I’ve got, or a chocolate cake for 12 that isn’t too sweet" ${busy ? 'disabled' : ''}>${esc(session.aiPrompt || '')}</textarea>
+      <div class="chips" style="margin-top:10px">${AI_IDEAS.map((i) => `<button class="tchip" data-idea="${esc(i)}">${esc(i)}</button>`).join('')}</div>
+    </div>
+    <div class="panel">
+      <div class="row">
+        <div class="grow"><label class="lbl">Serves</label><input class="field" type="number" min="1" max="50" id="aiServ" value="${esc(a.servings)}"></div>
+        <div class="grow"><label class="lbl">Time</label><select class="field" id="aiTime">${[['', 'Any'], ['15 minutes', '15 min'], ['30 minutes', '30 min'], ['1 hour', '1 hour'], ['all afternoon', 'Lots']].map(([v, l]) => `<option value="${v}" ${a.time === v ? 'selected' : ''}>${l}</option>`).join('')}</select></div>
+      </div>
+      <label class="lbl">Diet, allergies, things to avoid</label>
+      <input class="field" id="aiDiet" placeholder="e.g. no nuts, vegetarian, dairy-free" value="${esc(a.diet || '')}">
+      <label class="row small" style="gap:8px;margin-top:12px"><input type="checkbox" id="aiFridge" ${a.useFridge ? 'checked' : ''}> Use what’s in my fridge (${(db.fridge?.have || []).length} ticked in 🧊 What can I make?)</label>
+    </div>
+    <div class="panel">
+      <div class="h">AI ENGINE</div>
+      <div class="seg-ctl engines">${engBtn('claude', 'CLAUDE', 'best recipes')}${engBtn('groq', 'GROQ', 'super fast')}</div>
+      ${eng && !eng.claude && !eng.groq ? '<p class="hint" style="color:var(--accent)">No AI engine is connected on the 128bit server yet.</p>' : ''}
+    </div>
+    ${busy ? `<div class="loading">${chef(56)}<div class="loadbar"><i></i></div><span class="px small">COOKING UP YOUR RECIPE</span><p class="small muted">${a.engine === 'groq' ? 'A few seconds…' : 'This takes about 20–40 seconds.'}</p></div>`
+      : `<button class="btn ai block" id="aiGo">✨ MAKE MY RECIPE</button>`}
+    <div id="aiMsg">${session.aiError ? `<div class="flag bad" style="margin-top:12px">${esc(session.aiError)}</div>` : ''}</div>
+    <p class="small muted" style="text-align:center;margin-top:14px">You check and edit every AI recipe before it’s saved. AI can get things wrong, so trust your nose.</p>
+  </main>`;
+}
+
+// AI answer -> editable draft (the same review screen as imports).
+function aiToDraft(rec, engine, model, parent) {
+  const seen = new Set();
+  const ingredients = rec.ingredients.map((i) => {
+    let id = (i.id || 'i').replace(/[^\w-]/g, '') || 'i';
+    while (seen.has(id)) id += '2';
+    seen.add(id);
+    const ing = { id, qty: i.qty, unit: i.unit || '', item: i.item, prep: i.prep || '' };
+    if (i.qty2 != null) ing.qty2 = i.qty2;
+    if (i.loose) ing.loose = i.loose;
+    if (i.qty == null && !i.loose) { ing.missing = true; ing.note = 'The AI chef left this amount out'; }
+    return ing;
+  });
+  const sid = () => 's' + Date.now().toString(36) + Math.random().toString(36).slice(2, 6);
+  return {
+    id: 'r' + Date.now().toString(36), title: rec.title, servings: rec.servings || 4, servingsLabel: rec.servingsLabel || 'servings',
+    time: rec.time || {}, equipment: rec.equipment || [], lanes: rec.lanes?.length ? rec.lanes : [{ id: 'A', name: 'Main' }],
+    ingredients,
+    steps: rec.steps.map((s) => ({ id: sid(), lane: s.lane, text: s.text, merges: s.merges || [], timer: s.timer || null, wait: !!s.wait })),
+    tips: rec.tips || [],
+    source: { platform: 'ai', creator: `AI chef · ${engine === 'groq' ? 'Groq' : 'Claude'}`, url: '', model },
+    cooked: 0, created: Date.now(), image: null, ...(parent ? { parent } : {}),
+  };
+}
+
+async function runAI(extra = {}) {
+  const a = db.ai;
+  const prompt = (extra.prompt ?? session.aiPrompt ?? '').trim();
+  if (!prompt) { session.aiError = 'Say what you’d like to make first.'; return rerender(); }
+  session.aiBusy = true; session.aiError = null;
+  if (!extra.base) rerender(); else toast('✨ The AI chef is reworking it…');
+  try {
+    const res = await callFunction('bitrecipe-ai', {
+      prompt, engine: a.engine, servings: extra.base ? undefined : a.servings, time: extra.base ? undefined : a.time,
+      diet: a.diet, units: db.prefs.system === 'orig' ? null : db.prefs.system,
+      have: a.useFridge && !extra.base ? db.fridge?.have || [] : [], base: extra.base,
+    });
+    const draft = aiToDraft(res.recipe, res.engine, res.model, extra.parent);
+    session.draft = draft; session.editing = null; session.writing = false;
+    session.flags = [
+      { level: 'good', text: `✨ Made by the AI chef (${res.engine === 'groq' ? 'Groq' : 'Claude'}). Check it over, change anything you like, then save.` },
+      ...(typeof res.remaining === 'number' ? [{ level: 'info', text: `${res.remaining} AI recipe${res.remaining === 1 ? '' : 's'} left today.` }] : []),
+    ];
+    db.stats.ai = (db.stats.ai || 0) + 1; save();
+    session.aiBusy = false;
+    go('#/review');
+  } catch (e) {
+    session.aiBusy = false; session.aiError = e.message;
+    if (extra.base) toast(e.message); else rerender();
+  }
 }
 
 function listView() {
@@ -975,6 +1070,7 @@ function render() {
   else if (route === 'theme') html = themeView();
   else if (route === 'list') html = listView();
   else if (route === 'fridge') html = fridgeView();
+  else if (route === 'ai') { html = aiView(); if (signedIn() && !session.aiEngines) callFunction('bitrecipe-ai', null, { method: 'GET' }).then((r) => { session.aiEngines = r.engines; if (db.ai && r.engines && !r.engines[db.ai.engine]) db.ai.engine = r.engines.claude ? 'claude' : 'groq'; if (location.hash === '#/ai') rerender(); }).catch(() => {}); }
   else if (route === 'f' && findFamilyRecipe(db, arg)) html = recipeView(findFamilyRecipe(db, arg));
   else if (route === 'badges') html = badgesView();
   else if (route === 'settings') { html = settingsView(); if (!session.alerts) refreshAlerts(); }
@@ -1042,6 +1138,19 @@ $app.addEventListener('click', async (e) => {
   if (d.open) return go(d.open.startsWith('f:') ? '#/f/' + d.open.slice(2) : '#/r/' + d.open);
   if (d.filter) { session.filter = d.filter; return rerender(); }
   if (t.id === 'writeNew') return startWriting();
+  if (route === 'ai') {
+    db.ai ||= { engine: 'claude', diet: '', servings: 4, time: '', useFridge: false };
+    const keepForm = () => {
+      session.aiPrompt = document.getElementById('aiPrompt')?.value ?? session.aiPrompt;
+      db.ai.servings = Math.max(1, parseInt(document.getElementById('aiServ')?.value, 10) || db.ai.servings);
+      db.ai.time = document.getElementById('aiTime')?.value ?? db.ai.time;
+      db.ai.diet = (document.getElementById('aiDiet')?.value ?? db.ai.diet).trim();
+      db.ai.useFridge = !!document.getElementById('aiFridge')?.checked;
+    };
+    if (d.idea) { keepForm(); session.aiPrompt = d.idea; return rerender(); }
+    if (d.engine) { keepForm(); db.ai.engine = d.engine; save(); return rerender(); }
+    if (t.id === 'aiGo') { keepForm(); save(); return runAI(); }
+  }
 
   // what can I make
   if (route === 'fridge') {
@@ -1109,6 +1218,14 @@ $app.addEventListener('click', async (e) => {
     if (d.step && !e.target.closest('a')) { const s = ctxFor(r).done; s.has(d.step) ? s.delete(d.step) : s.add(d.step); return rerender(); }
     if (t.id === 'cook') return openCook(r);
     if (t.id === 'shareCard') return shareCard(r);
+    if (t.id === 'aiTweak') {
+      if (!signedIn()) { toast('Sign in to your 128bit account to use the AI chef'); return go('#/settings'); }
+      db.ai ||= { engine: 'claude', diet: '', servings: 4, time: '', useFridge: false };
+      const ask = prompt('How should the AI chef change this recipe?\n(e.g. make it vegetarian, double the sauce, no oven, gluten-free)');
+      if (!ask?.trim()) return;
+      const base = { title: r.title, servings: r.servings, ingredients: r.ingredients.map((i) => ({ id: i.id, qty: i.qty, qty2: i.qty2 ?? null, unit: i.unit, item: i.item, prep: i.prep || '', loose: i.loose || null })), lanes: r.lanes, steps: r.steps.map((s) => ({ lane: s.lane, text: s.text, merges: s.merges || [], timer: s.timer || null, wait: !!s.wait })), tips: r.tips || [] };
+      return runAI({ prompt: ask, base, parent: r._shared ? undefined : r.id });
+    }
     if (t.id === 'fav') { r.fav = !r.fav; save(); if (r.fav) toast('★ Added to favourites'); return rerender(); }
     if (d.tag) { const tg = new Set(r.tags || []); tg.has(d.tag) ? tg.delete(d.tag) : tg.add(d.tag); r.tags = [...tg]; save(); return rerender(); }
     if (t.id === 'newTag') { const n = (prompt('New collection name (e.g. Holiday, Mum’s)') || '').trim().slice(0, 20); if (n) { r.tags = [...new Set([...(r.tags || []), n])]; save(); rerender(); } return; }

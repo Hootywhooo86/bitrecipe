@@ -328,3 +328,12 @@ html.calm *, html.calm *::before, html.calm *::after { animation: none !importan
 @keyframes eq { from { transform: scaleY(.3); } to { transform: scaleY(1); } }
 .codeline { display: block; margin-top: 6px; font-size: 12px; color: var(--muted); }
 .codeline .code { font-size: 13px; padding: 4px 6px; background: var(--bg); border: 2px dashed var(--accent2); margin-left: 4px; }
+
+/* ---------- AI chef ---------- */
+.btn.ai { background: linear-gradient(90deg, var(--lane1), var(--lane3)); color: #120d08; box-shadow: 0 4px 0 var(--accent-deep); }
+.engines button { display: flex; flex-direction: column; align-items: center; gap: 4px; padding: 12px 6px; }
+.engines button small { font: 600 11px/1.2 system-ui, sans-serif; letter-spacing: 0; opacity: .8; }
+.engines button:disabled { opacity: .35; }
+.tips { padding-left: 18px; line-height: 1.6; }
+.tips li { margin-bottom: 6px; }
+.src.ai { background: linear-gradient(90deg, var(--lane1), var(--lane3)); color: #120d08; border-color: transparent; }

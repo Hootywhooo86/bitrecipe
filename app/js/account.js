@@ -106,3 +106,23 @@ export async function api(path, { method = 'GET', body, headers = {} } = {}) {
   }
   return json;
 }
+
+// Signed-in call to a 128bit Edge Function (e.g. the AI chef).
+export async function callFunction(name, body, { method = 'POST', timeoutMs = 150000 } = {}) {
+  let res;
+  try {
+    res = await fetch(`${FAMILY.url}/functions/v1/${name}`, {
+      method,
+      headers: { apikey: FAMILY.key, Authorization: `Bearer ${await token()}`, 'Content-Type': 'application/json' },
+      body: method === 'GET' ? undefined : JSON.stringify(body || {}),
+      signal: AbortSignal.timeout ? AbortSignal.timeout(timeoutMs) : undefined,
+    });
+  } catch (e) {
+    if (/Sign in/.test(e.message)) throw e;
+    throw new Error(e?.name === 'TimeoutError' ? 'The AI chef took too long. Try again.' : 'Can’t reach the 128bit server. Check your connection.');
+  }
+  const json = await res.json().catch(() => null);
+  if (res.status === 404) throw new Error('The AI chef isn’t on the 128bit server yet.');
+  if (!res.ok) throw new Error(json?.error || json?.message || `The 128bit server answered ${res.status}.`);
+  return json;
+}
