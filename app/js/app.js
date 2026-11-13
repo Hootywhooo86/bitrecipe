@@ -698,10 +698,10 @@ function aiView() {
     </div>
     <div class="panel">
       <div class="h">AI ENGINE</div>
-      <div class="seg-ctl engines">${engBtn('claude', 'CLAUDE', 'best recipes')}${engBtn('gemini', 'GEMINI', 'quick & smart')}${engBtn('groq', 'GROQ', 'super fast')}</div>
-      ${eng && !eng.claude && !eng.groq && !eng.gemini ? '<p class="hint" style="color:var(--accent)">No AI engine is connected on the 128bit server yet.</p>' : ''}
+      <div class="engines">${engBtn('claude', 'CLAUDE', 'best recipes')}${engBtn('gemini', 'GEMINI', 'quick & smart')}${engBtn('groq', 'GROQ', 'super fast')}${engBtn('cerebras', 'CEREBRAS', 'lightning fast')}${engBtn('openrouter', 'OPENROUTER', 'free models')}</div>
+      ${eng && !Object.values(eng).some(Boolean) ? '<p class="hint" style="color:var(--accent)">No AI engine is connected on the 128bit server yet.</p>' : ''}
     </div>
-    ${busy ? `<div class="loading">${chef(56)}<div class="loadbar"><i></i></div><span class="px small">COOKING UP YOUR RECIPE</span><p class="small muted">${a.engine === 'groq' ? 'A few seconds…' : a.engine === 'gemini' ? 'About 10–20 seconds…' : 'This takes about 20–40 seconds.'}</p></div>`
+    ${busy ? `<div class="loading">${chef(56)}<div class="loadbar"><i></i></div><span class="px small">COOKING UP YOUR RECIPE</span><p class="small muted">${['groq', 'cerebras'].includes(a.engine) ? 'A few seconds…' : a.engine === 'claude' ? 'This takes about 20–40 seconds.' : 'About 10–30 seconds…'}</p></div>`
       : `<button class="btn ai block" id="aiGo">✨ MAKE MY RECIPE</button>`}
     <div id="aiMsg">${session.aiError ? `<div class="flag bad" style="margin-top:12px">${esc(session.aiError)}</div>` : ''}</div>
     <p class="small muted" style="text-align:center;margin-top:14px">You check and edit every AI recipe before it’s saved. AI can get things wrong, so trust your nose.</p>
@@ -728,7 +728,7 @@ function aiToDraft(rec, engine, model, parent) {
     ingredients,
     steps: rec.steps.map((s) => ({ id: sid(), lane: s.lane, text: s.text, merges: s.merges || [], timer: s.timer || null, wait: !!s.wait })),
     tips: rec.tips || [],
-    source: { platform: 'ai', creator: `AI chef · ${{ claude: 'Claude', groq: 'Groq', gemini: 'Gemini' }[engine] || 'AI'}`, url: '', model },
+    source: { platform: 'ai', creator: `AI chef · ${{ claude: 'Claude', groq: 'Groq', gemini: 'Gemini', cerebras: 'Cerebras', openrouter: 'OpenRouter' }[engine] || 'AI'}`, url: '', model },
     cooked: 0, created: Date.now(), image: null, ...(parent ? { parent } : {}),
   };
 }
@@ -748,7 +748,7 @@ async function runAI(extra = {}) {
     const draft = aiToDraft(res.recipe, res.engine, res.model, extra.parent);
     session.draft = draft; session.editing = null; session.writing = false;
     session.flags = [
-      { level: 'good', text: `✨ Made by the AI chef (${{ claude: 'Claude', groq: 'Groq', gemini: 'Gemini' }[res.engine] || 'AI'}). Check it over, change anything you like, then save.` },
+      { level: 'good', text: `✨ Made by the AI chef (${{ claude: 'Claude', groq: 'Groq', gemini: 'Gemini', cerebras: 'Cerebras', openrouter: 'OpenRouter' }[res.engine] || 'AI'}). Check it over, change anything you like, then save.` },
       ...(typeof res.remaining === 'number' ? [{ level: 'info', text: `${res.remaining} AI recipe${res.remaining === 1 ? '' : 's'} left today.` }] : []),
     ];
     db.stats.ai = (db.stats.ai || 0) + 1; save();
@@ -1070,7 +1070,7 @@ function render() {
   else if (route === 'theme') html = themeView();
   else if (route === 'list') html = listView();
   else if (route === 'fridge') html = fridgeView();
-  else if (route === 'ai') { html = aiView(); if (signedIn() && !session.aiEngines) callFunction('bitrecipe-ai', null, { method: 'GET' }).then((r) => { session.aiEngines = r.engines; if (db.ai && r.engines && !r.engines[db.ai.engine]) db.ai.engine = ['claude', 'gemini', 'groq'].find((e) => r.engines[e]) || 'claude'; if (location.hash === '#/ai') rerender(); }).catch(() => {}); }
+  else if (route === 'ai') { html = aiView(); if (signedIn() && !session.aiEngines) callFunction('bitrecipe-ai', null, { method: 'GET' }).then((r) => { session.aiEngines = r.engines; if (db.ai && r.engines && !r.engines[db.ai.engine]) db.ai.engine = ['claude', 'gemini', 'groq', 'cerebras', 'openrouter'].find((e) => r.engines[e]) || 'claude'; if (location.hash === '#/ai') rerender(); }).catch(() => {}); }
   else if (route === 'f' && findFamilyRecipe(db, arg)) html = recipeView(findFamilyRecipe(db, arg));
   else if (route === 'badges') html = badgesView();
   else if (route === 'settings') { html = settingsView(); if (!session.alerts) refreshAlerts(); }

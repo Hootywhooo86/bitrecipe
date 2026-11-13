@@ -1,8 +1,8 @@
 // bitrecipe AI chef: "what do you want to make?" in, a bitrecipe-format recipe out.
-// Three engines, picked in the app: Claude (best quality), Groq (fastest) or Gemini.
+// Engines, picked in the app: Claude (best quality), Gemini, Groq, Cerebras, OpenRouter.
 //
-// The API keys live only here, as the Edge Function secrets ANTHROPIC_API_KEY
-// GROQ_API_KEY and GEMINI_API_KEY (any of them). The app calls this function with the signed-in 128bit
+// The API keys live only here, as Edge Function secrets (any of them):
+// ANTHROPIC_API_KEY, GEMINI_API_KEY, GROQ_API_KEY, CEREBRAS_API_KEY, OPENROUTER_API_KEY. The app calls this function with the signed-in 128bit
 // user's token; each account gets a daily limit (bitrecipe_ai_take in
 // supabase/bitrecipe-ai.sql) so nobody can run up the bill.
 import "jsr:@supabase/functions-js/edge-runtime.d.ts";
@@ -12,6 +12,9 @@ const MODEL = "claude-opus-5-5";
 // Groq: OpenAI-compatible API; gpt-oss-120b supports strict JSON-schema output.
 const GROQ_MODEL = Deno.env.get("GROQ_MODEL") ?? "openai/gpt-oss-120b";
 const GROQ_URL = "https://api.groq.com/openai/v1/chat/completions";
+// Cerebras and OpenRouter: OpenAI-compatible, like Groq.
+const CEREBRAS_MODEL = Deno.env.get("CEREBRAS_MODEL") ?? "gpt-oss-120b";
+const OPENROUTER_MODEL = Deno.env.get("OPENROUTER_MODEL") ?? "openai/gpt-oss-120b:free";
 // Gemini: generateContent with a JSON-schema response constraint.
 const GEMINI_MODEL = Deno.env.get("GEMINI_MODEL") ?? "gemini-3.8-flash";
 const GEMINI_URL = (m: string) => `https://generativelanguage.googleapis.com/v1beta/models/${m}:generateContent`;
@@ -179,31 +182,58 @@ async function withClaude(prompt: string): Promise<{ recipe: Recipe; model: stri
   }
 }
 
-async function withGroq(prompt: string): Promise<{ recipe: Recipe; model: string }> {
-  let res: Response;
-  try {
-    res = await fetch(GROQ_URL, {
-      method: "POST",
-      headers: { Authorization: `Bearer ${Deno.env.get("GROQ_API_KEY")}`, "Content-Type": "application/json" },
-      body: JSON.stringify({
-        model: GROQ_MODEL,
-        max_completion_tokens: 16000,
-        messages: [{ role: "system", content: SYSTEM }, { role: "user", content: prompt }],
-        response_format: { type: "json_schema", json_schema: { name: "bitrecipe_recipe", strict: true, schema: RECIPE_SCHEMA } },
-      }),
-      signal: AbortSignal.timeout(120_000),
-    });
-  } catch { throw fail(504, "Couldn't reach Groq. Try again."); }
-  const json = await res.json().catch(() => null);
-  if (res.status === 401 || res.status === 403) throw fail(503, "Groq isn't connected yet (GROQ_API_KEY secret missing or wrong).");
-  if (res.status === 429) throw fail(429, "Groq is busy. Try again in a minute, or switch to Claude.");
-  if (!res.ok) throw fail(502, `Groq error ${res.status}. Try again.`);
+// One helper for every OpenAI-compatible engine (Groq, Cerebras, OpenRouter).
+// Asks for the strict recipe schema first; if that engine/model can't do it,
+// asks again with the schema written into the instructions. normalize() then
+// guarantees a valid recipe either way.
+type Compat = { name: string; url: string; key: string; model: string; tokensParam?: string; headers?: Record<string, string>; body?: Record<string, unknown> };
+async function compatEngine(c: Compat, prompt: string): Promise<{ recipe: Recipe; model: string }> {
+  const call = async (strictSchema: boolean) => {
+    const system = strictSchema ? SYSTEM : `${SYSTEM}\n\nReply with only a JSON object matching this JSON Schema:\n${JSON.stringify(RECIPE_SCHEMA)}`;
+    try {
+      return await fetch(c.url, {
+        method: "POST",
+        headers: { Authorization: `Bearer ${Deno.env.get(c.key)}`, "Content-Type": "application/json", ...(c.headers ?? {}) },
+        body: JSON.stringify({
+          model: c.model,
+          [c.tokensParam ?? "max_completion_tokens"]: 16000,
+          messages: [{ role: "system", content: system }, { role: "user", content: prompt }],
+          response_format: strictSchema
+            ? { type: "json_schema", json_schema: { name: "bitrecipe_recipe", strict: true, schema: RECIPE_SCHEMA } }
+            : { type: "json_object" },
+          ...(c.body ?? {}),
+        }),
+        signal: AbortSignal.timeout(120_000),
+      });
+    } catch { throw fail(504, `Couldn't reach ${c.name}. Try again.`); }
+  };
+  let res = await call(true);
+  let json = await res.json().catch(() => null);
+  const errText = () => JSON.stringify(json ?? "");
+  if ((res.status === 400 || res.status === 404 || res.status === 422) && /schema|response_format|structured|json|support|endpoints?/i.test(errText()) && !/model.*(not exist|not found|invalid)/i.test(errText())) {
+    res = await call(false);
+    json = await res.json().catch(() => null);
+  }
+  if (res.status === 401 || res.status === 403) throw fail(503, `${c.name} isn't connected yet (${c.key} secret missing or wrong).`);
+  if (res.status === 402) throw fail(503, `${c.name} needs credits on your account. Switch engines or top it up.`);
+  if (res.status === 429) throw fail(429, `${c.name} is busy or out of free requests for today. Try another engine.`);
+  if (res.status === 404 || (res.status === 400 && /model/i.test(errText()))) throw fail(502, `${c.name} can't find the model ${c.model}. Set the ${c.key.replace("_API_KEY", "_MODEL")} secret.`);
+  if (!res.ok) throw fail(502, `${c.name} error ${res.status}. Try again.`);
   const choice = json?.choices?.[0];
   if (choice?.finish_reason === "length") throw fail(502, "That recipe came out too long. Try something a bit simpler.");
-  const content = choice?.message?.content;
-  if (!content) throw fail(502, "Groq didn't send a recipe. Try again.");
-  return { recipe: JSON.parse(content), model: json.model ?? GROQ_MODEL };
+  if (choice?.finish_reason === "content_filter") throw fail(422, "The AI chef can't help with that one. Try asking for a different dish.");
+  const content = String(choice?.message?.content ?? "").trim().replace(/^```(?:json)?\s*|\s*```$/g, "");
+  if (!content) throw fail(502, `${c.name} didn't send a recipe. Try again.`);
+  return { recipe: normalize(JSON.parse(content)), model: json?.model ?? c.model };
 }
+
+const withGroq = (p: string) => compatEngine({ name: "Groq", url: GROQ_URL, key: "GROQ_API_KEY", model: GROQ_MODEL }, p);
+const withCerebras = (p: string) => compatEngine({ name: "Cerebras", url: "https://api.cerebras.ai/v1/chat/completions", key: "CEREBRAS_API_KEY", model: CEREBRAS_MODEL }, p);
+const withOpenRouter = (p: string) => compatEngine({
+  name: "OpenRouter", url: "https://openrouter.ai/api/v1/chat/completions", key: "OPENROUTER_API_KEY", model: OPENROUTER_MODEL, tokensParam: "max_tokens",
+  headers: { "X-Title": "bitrecipe" },
+  body: { provider: { require_parameters: true } }, // only send to providers that honour the recipe schema
+}, p);
 
 // Fill anything a less strict engine left out, so the app always gets a valid recipe.
 function normalize(x: Record<string, unknown>): Recipe {
@@ -276,9 +306,12 @@ async function withGemini(prompt: string): Promise<{ recipe: Recipe; model: stri
 
 const ENGINES = {
   claude: { key: "ANTHROPIC_API_KEY", run: withClaude },
-  groq: { key: "GROQ_API_KEY", run: withGroq },
   gemini: { key: "GEMINI_API_KEY", run: withGemini },
+  groq: { key: "GROQ_API_KEY", run: withGroq },
+  cerebras: { key: "CEREBRAS_API_KEY", run: withCerebras },
+  openrouter: { key: "OPENROUTER_API_KEY", run: withOpenRouter },
 } as const;
+const ORDER = ["claude", "gemini", "groq", "cerebras", "openrouter"] as const;
 const configured = () => Object.fromEntries(Object.entries(ENGINES).map(([k, v]) => [k, !!Deno.env.get(v.key)]));
 
 Deno.serve(async (req) => {
@@ -290,11 +323,11 @@ Deno.serve(async (req) => {
   try { body = await req.json(); } catch { return reply(400, { error: "Send JSON." }); }
   if (!String(body.prompt ?? "").trim()) return reply(400, { error: "Say what you'd like to make." });
 
-  const want = (["claude", "groq", "gemini"] as const).find((e) => e === body.engine) ?? "claude";
+  const want = ORDER.find((e) => e === body.engine) ?? "claude";
   const avail = configured();
   // use the engine asked for; if it isn't set up, use whichever one is
-  const engine = avail[want] ? want : (["claude", "gemini", "groq"] as const).find((e) => avail[e]) ?? null;
-  if (!engine) return reply(503, { error: "The AI chef isn't connected yet (add ANTHROPIC_API_KEY, GROQ_API_KEY or GEMINI_API_KEY in Supabase)." });
+  const engine = avail[want] ? want : ORDER.find((e) => avail[e]) ?? null;
+  if (!engine) return reply(503, { error: "The AI chef isn't connected yet (add an AI key such as GEMINI_API_KEY or GROQ_API_KEY in Supabase)." });
 
   let remaining: number;
   try { remaining = await takeQuota(auth); } catch (e) {

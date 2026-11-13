@@ -331,7 +331,9 @@ html.calm *, html.calm *::before, html.calm *::after { animation: none !importan
 
 /* ---------- AI chef ---------- */
 .btn.ai { background: linear-gradient(90deg, var(--lane1), var(--lane3)); color: #120d08; box-shadow: 0 4px 0 var(--accent-deep); }
-.engines button { display: flex; flex-direction: column; align-items: center; gap: 4px; padding: 12px 6px; }
+.engines { display: grid; grid-template-columns: repeat(auto-fit, minmax(96px, 1fr)); gap: 6px; }
+.engines button { display: flex; flex-direction: column; align-items: center; gap: 4px; padding: 12px 6px; background: var(--bg); border: 3px solid var(--edge); font-family: var(--px); font-size: 8px; color: var(--muted); line-height: 1.5; }
+.engines button.on { background: var(--accent2); color: var(--on-accent2); border-color: var(--accent2-deep); }
 .engines button small { font: 600 11px/1.2 system-ui, sans-serif; letter-spacing: 0; opacity: .8; }
 .engines button:disabled { opacity: .35; }
 .tips { padding-left: 18px; line-height: 1.6; }
