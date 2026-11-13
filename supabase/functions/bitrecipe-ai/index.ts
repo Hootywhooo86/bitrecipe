@@ -129,6 +129,15 @@ async function takeQuota(auth: string): Promise<number> {
   return Number(body);
 }
 
+// The AI didn't make a recipe: hand today's use back (best effort).
+async function giveBack(auth: string): Promise<void> {
+  await fetch(`${Deno.env.get("SUPABASE_URL")}/rest/v1/rpc/bitrecipe_ai_give_back`, {
+    method: "POST",
+    headers: { apikey: Deno.env.get("SUPABASE_ANON_KEY")!, Authorization: auth, "Content-Type": "application/json" },
+    body: "{}",
+  }).catch(() => null);
+}
+
 function buildPrompt(b: Record<string, unknown>): string {
   const lines = [`What I want to make: ${String(b.prompt ?? "").slice(0, 600)}`];
   if (b.servings) lines.push(`Servings: ${Number(b.servings)}`);
@@ -572,6 +581,7 @@ Deno.serve(async (req) => {
     log({ engine: backup, model: second.model, ok: true, ms: Date.now() - t0, backupFor: engine });
     return reply(200, { recipe: tidy(second.recipe!), remaining, engine: backup, model: second.model, backupFor: engine, firstError: first.error });
   } catch (e) {
+    await giveBack(auth); // failed attempts don't count against the daily limit
     const code = (e as { status?: number }).status;
     if (code) return reply(code, { error: (e as Error).message });
     if (e instanceof SyntaxError) return reply(502, { error: "The recipe came back garbled. Try again." });

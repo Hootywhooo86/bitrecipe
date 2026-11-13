@@ -27,3 +27,19 @@ revoke all on function public.bitrecipe_ai_take(int) from public, anon;
 grant execute on function public.bitrecipe_ai_take(int) to authenticated;
 revoke all on table public.bitrecipe_ai_usage from anon;
 grant select on table public.bitrecipe_ai_usage to authenticated;
+
+-- Gives back one AI recipe for today when the AI failed to make one,
+-- so only recipes that actually arrive count against the limit.
+create or replace function public.bitrecipe_ai_give_back() returns int
+language plpgsql security definer set search_path = public as $$
+declare me text := public.account_sub(); n int;
+begin
+  if me is null then raise exception 'Sign in first'; end if;
+  update bitrecipe_ai_usage set used = greatest(used - 1, 0)
+    where user_id = me and day = (now() at time zone 'utc')::date
+    returning used into n;
+  return coalesce(n, 0);
+end $$;
+
+revoke all on function public.bitrecipe_ai_give_back() from public, anon;
+grant execute on function public.bitrecipe_ai_give_back() to authenticated;
