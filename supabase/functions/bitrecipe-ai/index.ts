@@ -340,7 +340,17 @@ async function withGemini(prompt: string, m?: string): Promise<{ recipe: Recipe;
   throw last;
 }
 
+// Newer Gemini models "think" before answering, which can take minutes on a full
+// recipe. Keep it short: thinkingLevel for Gemini 3+, thinkingBudget for 2.x Flash.
+function geminiThinking(model: string): Record<string, unknown> | null {
+  const v = Number(model.match(/gemini-(\d+(?:\.\d+)?)/)?.[1] ?? 0);
+  if (v >= 3) return { thinkingLevel: "low" };
+  if (v >= 2.5 && /flash/.test(model)) return { thinkingBudget: 0 };
+  return null;
+}
+
 async function geminiWith(model: string, prompt: string): Promise<{ recipe: Recipe; model: string }> {
+  let thinking = geminiThinking(model);
   const call = async (strictSchema: boolean) => {
     const system = strictSchema ? SYSTEM : `${SYSTEM}\n\nReply with only a JSON object matching this JSON Schema:\n${JSON.stringify(RECIPE_SCHEMA)}`;
     try {
@@ -352,6 +362,7 @@ async function geminiWith(model: string, prompt: string): Promise<{ recipe: Reci
           contents: [{ role: "user", parts: [{ text: prompt }] }],
           generationConfig: {
             maxOutputTokens: 16000,
+            ...(thinking ? { thinkingConfig: thinking } : {}),
             responseMimeType: "application/json",
             ...(strictSchema ? { responseJsonSchema: RECIPE_SCHEMA } : {}),
           },
@@ -359,11 +370,17 @@ async function geminiWith(model: string, prompt: string): Promise<{ recipe: Reci
         signal: AbortSignal.timeout(120_000),
       });
     } catch (e) {
-      throw fail(504, (e as Error)?.name === "TimeoutError" ? `Gemini (${model}) took over 2 minutes and was stopped. Try another engine.` : "Couldn't reach Gemini. Try again.");
+      throw fail(504, (e as Error)?.name === "TimeoutError" ? `Gemini (${model}) took too long and was stopped. Try another engine.` : "Couldn't reach Gemini. Try again.");
     }
   };
   let res = await call(true);
   let json = await res.json().catch(() => null);
+  // A model that doesn't know the thinking setting: ask again without it.
+  if (res.status === 400 && thinking && /thinking/i.test(JSON.stringify(json ?? ""))) {
+    thinking = null;
+    res = await call(true);
+    json = await res.json().catch(() => null);
+  }
   // If this model won't take the schema field, ask again with the schema in the instructions.
   if (res.status === 400 && /schema|unknown name|invalid json payload/i.test(JSON.stringify(json ?? ""))) {
     res = await call(false);
@@ -537,8 +554,8 @@ Deno.serve(async (req) => {
   const pick = typeof body.model === "string" && MODEL_ID.test(body.model) && engine === want ? body.model : undefined;
   const backup = BACKUP[engine] && avail[BACKUP[engine]!] && body.noBackup !== true ? (BACKUP[engine] as Engine) : null;
   try {
-    // with a backup engine, give the first engine 70 s so both fit in the time limit
-    const first = await testLike(engine, pick, prompt, backup ? 70_000 : 140_000);
+    // with a backup engine, give the first engine 45 s so both fit well inside Supabase's 150 s limit
+    const first = await testLike(engine, pick, prompt, backup ? 45_000 : 110_000);
     if (first.ok) {
       log({ engine, model: first.model, ok: true, ms: Date.now() - t0 });
       return reply(200, { recipe: tidy(first.recipe!), remaining, engine, model: first.model });
@@ -547,7 +564,7 @@ Deno.serve(async (req) => {
     // refusals and key problems shouldn't hop engines; anything else falls back once
     if (!backup || first.status === 422 || first.status === 401) throw first.err;
     const bm = body.models && typeof body.models === "object" ? (body.models as Record<string, unknown>)[backup] : undefined;
-    const second = await testLike(backup, typeof bm === "string" && MODEL_ID.test(bm) ? bm : undefined, prompt, 140_000 - (Date.now() - t0));
+    const second = await testLike(backup, typeof bm === "string" && MODEL_ID.test(bm) ? bm : undefined, prompt, Math.min(75_000, 120_000 - (Date.now() - t0)));
     if (!second.ok) {
       log({ engine: backup, ok: false, ms: Date.now() - t0, error: second.error?.slice(0, 200) });
       throw fail(502, `${first.error} Then the backup (${backup}) failed too: ${second.error}`);

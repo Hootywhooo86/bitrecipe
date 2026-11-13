@@ -123,6 +123,7 @@ export async function callFunction(name, body, { method = 'POST', timeoutMs = 15
   }
   const json = await res.json().catch(() => null);
   if (res.status === 404) throw new Error('The AI chef isn’t on the 128bit server yet.');
+  if (res.status === 546 || res.status === 504) throw new Error('The AI chef ran out of time on the server. Try again, or pick a faster engine like Groq.');
   if (!res.ok) throw new Error(json?.error || json?.message || `The 128bit server answered ${res.status}.`);
   return json;
 }
