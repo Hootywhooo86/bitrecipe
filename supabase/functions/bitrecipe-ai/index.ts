@@ -1,8 +1,8 @@
 // bitrecipe AI chef: "what do you want to make?" in, a bitrecipe-format recipe out.
-// Two engines, picked in the app: Claude (best quality) or Groq (fastest, cheapest).
+// Three engines, picked in the app: Claude (best quality), Groq (fastest) or Gemini.
 //
 // The API keys live only here, as the Edge Function secrets ANTHROPIC_API_KEY
-// and GROQ_API_KEY (either or both). The app calls this function with the signed-in 128bit
+// GROQ_API_KEY and GEMINI_API_KEY (any of them). The app calls this function with the signed-in 128bit
 // user's token; each account gets a daily limit (bitrecipe_ai_take in
 // supabase/bitrecipe-ai.sql) so nobody can run up the bill.
 import "jsr:@supabase/functions-js/edge-runtime.d.ts";
@@ -12,6 +12,9 @@ const MODEL = "claude-opus-5-5";
 // Groq: OpenAI-compatible API; gpt-oss-120b supports strict JSON-schema output.
 const GROQ_MODEL = Deno.env.get("GROQ_MODEL") ?? "openai/gpt-oss-120b";
 const GROQ_URL = "https://api.groq.com/openai/v1/chat/completions";
+// Gemini: generateContent with a JSON-schema response constraint.
+const GEMINI_MODEL = Deno.env.get("GEMINI_MODEL") ?? "gemini-3.8-flash";
+const GEMINI_URL = (m: string) => `https://generativelanguage.googleapis.com/v1beta/models/${m}:generateContent`;
 const DAILY_LIMIT = Number(Deno.env.get("BITRECIPE_AI_DAILY_LIMIT") ?? "25");
 
 const UNITS = ["", "g", "kg", "oz", "lb", "ml", "l", "tsp", "tbsp", "cup", "fl oz", "clove", "can", "pinch", "dash", "slice", "stick", "sprig", "bunch", "head", "piece", "packet", "jar", "knob", "sheet", "fillet", "stalk", "leaf"];
@@ -202,7 +205,80 @@ async function withGroq(prompt: string): Promise<{ recipe: Recipe; model: string
   return { recipe: JSON.parse(content), model: json.model ?? GROQ_MODEL };
 }
 
-const ENGINES = { claude: { key: "ANTHROPIC_API_KEY", run: withClaude }, groq: { key: "GROQ_API_KEY", run: withGroq } } as const;
+// Fill anything a less strict engine left out, so the app always gets a valid recipe.
+function normalize(x: Record<string, unknown>): Recipe {
+  const arr = (v: unknown) => (Array.isArray(v) ? v : []);
+  const r = x as Record<string, any>;
+  r.title = String(r.title || "AI recipe");
+  r.servings = Number.isInteger(r.servings) && r.servings > 0 ? r.servings : 4;
+  r.servingsLabel = String(r.servingsLabel || "servings");
+  r.time = { active: Number(r.time?.active) || 0, total: Number(r.time?.total) || 0 };
+  r.equipment = arr(r.equipment).map(String);
+  r.lanes = arr(r.lanes).filter((l: any) => ["A", "B", "C"].includes(l?.id)).map((l: any) => ({ id: l.id, name: String(l.name || `Track ${l.id}`) }));
+  if (!r.lanes.length) r.lanes = [{ id: "A", name: "Main" }];
+  r.ingredients = arr(r.ingredients).filter((i: any) => i?.item).map((i: any, k: number) => ({
+    id: String(i.id || `i${k}`), qty: typeof i.qty === "number" ? i.qty : null, qty2: typeof i.qty2 === "number" ? i.qty2 : null,
+    unit: UNITS.includes(i.unit) ? i.unit : "", item: String(i.item), prep: String(i.prep || ""), loose: i.loose ? String(i.loose) : null,
+  }));
+  r.steps = arr(r.steps).filter((s: any) => s?.text).map((s: any) => ({
+    lane: ["A", "B", "C"].includes(s.lane) ? s.lane : "A", text: String(s.text), merges: arr(s.merges).filter((m: any) => ["A", "B", "C"].includes(m)),
+    timer: s.timer && Number(s.timer.min) > 0 ? { min: Math.round(Number(s.timer.min)), label: String(s.timer.label || "Timer") } : null, wait: !!s.wait,
+  }));
+  r.tips = arr(r.tips).map(String).slice(0, 3);
+  if (!r.ingredients.length || !r.steps.length) throw fail(502, "The AI chef sent an incomplete recipe. Try again.");
+  return r as Recipe;
+}
+
+async function withGemini(prompt: string): Promise<{ recipe: Recipe; model: string }> {
+  const call = async (strictSchema: boolean) => {
+    const system = strictSchema ? SYSTEM : `${SYSTEM}\n\nReply with only a JSON object matching this JSON Schema:\n${JSON.stringify(RECIPE_SCHEMA)}`;
+    try {
+      return await fetch(GEMINI_URL(GEMINI_MODEL), {
+        method: "POST",
+        headers: { "x-goog-api-key": Deno.env.get("GEMINI_API_KEY")!, "Content-Type": "application/json" },
+        body: JSON.stringify({
+          systemInstruction: { parts: [{ text: system }] },
+          contents: [{ role: "user", parts: [{ text: prompt }] }],
+          generationConfig: {
+            maxOutputTokens: 16000,
+            responseMimeType: "application/json",
+            ...(strictSchema ? { responseJsonSchema: RECIPE_SCHEMA } : {}),
+          },
+        }),
+        signal: AbortSignal.timeout(120_000),
+      });
+    } catch { throw fail(504, "Couldn't reach Gemini. Try again."); }
+  };
+  let res = await call(true);
+  let json = await res.json().catch(() => null);
+  // If this model won't take the schema field, ask again with the schema in the instructions.
+  if (res.status === 400 && /schema|unknown name|invalid json payload/i.test(JSON.stringify(json ?? ""))) {
+    res = await call(false);
+    json = await res.json().catch(() => null);
+  }
+  if (res.status === 401 || res.status === 403 || (res.status === 400 && /api key/i.test(JSON.stringify(json ?? "")))) {
+    throw fail(503, "Gemini isn't connected yet (GEMINI_API_KEY secret missing or wrong).");
+  }
+  if (res.status === 404) throw fail(502, `Gemini model ${GEMINI_MODEL} isn't available. Set the GEMINI_MODEL secret.`);
+  if (res.status === 429) throw fail(429, "Gemini is busy. Try again in a minute, or switch engines.");
+  if (!res.ok) throw fail(502, `Gemini error ${res.status}. Try again.`);
+  if (json?.promptFeedback?.blockReason) throw fail(422, "The AI chef can't help with that one. Try asking for a different dish.");
+  const cand = json?.candidates?.[0];
+  if (cand?.finishReason === "MAX_TOKENS") throw fail(502, "That recipe came out too long. Try something a bit simpler.");
+  if (["SAFETY", "PROHIBITED_CONTENT", "BLOCKLIST", "SPII", "RECITATION"].includes(cand?.finishReason)) {
+    throw fail(422, "The AI chef can't help with that one. Try asking for a different dish.");
+  }
+  const text = (cand?.content?.parts ?? []).map((p: { text?: string }) => p.text ?? "").join("").trim();
+  if (!text) throw fail(502, "Gemini didn't send a recipe. Try again.");
+  const cleaned = text.replace(/^```(?:json)?\s*|\s*```$/g, "");
+  return { recipe: normalize(JSON.parse(cleaned)), model: json?.modelVersion ?? GEMINI_MODEL };
+}
+
+const ENGINES = {
+  claude: { key: "ANTHROPIC_API_KEY", run: withClaude },
+  groq: { key: "GROQ_API_KEY", run: withGroq },
+  gemini: { key: "GEMINI_API_KEY", run: withGemini },
+} as const;
 const configured = () => Object.fromEntries(Object.entries(ENGINES).map(([k, v]) => [k, !!Deno.env.get(v.key)]));
 
 Deno.serve(async (req) => {
@@ -214,11 +290,11 @@ Deno.serve(async (req) => {
   try { body = await req.json(); } catch { return reply(400, { error: "Send JSON." }); }
   if (!String(body.prompt ?? "").trim()) return reply(400, { error: "Say what you'd like to make." });
 
-  const want = body.engine === "groq" ? "groq" : "claude";
+  const want = (["claude", "groq", "gemini"] as const).find((e) => e === body.engine) ?? "claude";
   const avail = configured();
-  // use the engine asked for; if only the other one is set up, use that
-  const engine = avail[want] ? want : avail.claude ? "claude" : avail.groq ? "groq" : null;
-  if (!engine) return reply(503, { error: "The AI chef isn't connected yet (add ANTHROPIC_API_KEY or GROQ_API_KEY in Supabase)." });
+  // use the engine asked for; if it isn't set up, use whichever one is
+  const engine = avail[want] ? want : (["claude", "gemini", "groq"] as const).find((e) => avail[e]) ?? null;
+  if (!engine) return reply(503, { error: "The AI chef isn't connected yet (add ANTHROPIC_API_KEY, GROQ_API_KEY or GEMINI_API_KEY in Supabase)." });
 
   let remaining: number;
   try { remaining = await takeQuota(auth); } catch (e) {
