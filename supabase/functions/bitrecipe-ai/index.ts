@@ -14,7 +14,13 @@ const GROQ_MODEL = Deno.env.get("GROQ_MODEL") ?? "openai/gpt-oss-120b";
 const GROQ_URL = "https://api.groq.com/openai/v1/chat/completions";
 // Cerebras and OpenRouter: OpenAI-compatible, like Groq.
 const CEREBRAS_MODEL = Deno.env.get("CEREBRAS_MODEL") ?? "gpt-oss-120b";
-const OPENROUTER_MODEL = Deno.env.get("OPENROUTER_MODEL") ?? "openai/gpt-oss-120b:free";
+// OpenRouter's free models change often: unless OPENROUTER_MODEL is set, pick from
+// the live list of free models that support structured outputs (best first).
+const OPENROUTER_MODEL = Deno.env.get("OPENROUTER_MODEL") ?? "";
+const OPENROUTER_PREFER = [
+  "nvidia/nemotron-3.5-super-vl:free", "baidu/ernie-5.5-flash-preview:free",
+  "dots-studio/dots-3-note-preview:free", "particle-ai/particle-1:free",
+];
 // Gemini: generateContent with a JSON-schema response constraint.
 const GEMINI_MODEL = Deno.env.get("GEMINI_MODEL") ?? "gemini-3.8-flash";
 const GEMINI_URL = (m: string) => `https://generativelanguage.googleapis.com/v1beta/models/${m}:generateContent`;
@@ -217,7 +223,11 @@ async function compatEngine(c: Compat, prompt: string): Promise<{ recipe: Recipe
   if (res.status === 401 || res.status === 403) throw fail(503, `${c.name} isn't connected yet (${c.key} secret missing or wrong).`);
   if (res.status === 402) throw fail(503, `${c.name} needs credits on your account. Switch engines or top it up.`);
   if (res.status === 429) throw fail(429, `${c.name} is busy or out of free requests for today. Try another engine.`);
-  if (res.status === 404 || (res.status === 400 && /model/i.test(errText()))) throw fail(502, `${c.name} can't find the model ${c.model}. Set the ${c.key.replace("_API_KEY", "_MODEL")} secret.`);
+  if (res.status === 404 || (res.status === 400 && /model/i.test(errText()))) {
+    throw fail(502, /endpoints/i.test(errText())
+      ? `${c.name}'s ${c.model} can't take recipe requests right now. Try again or switch engines.`
+      : `${c.name} can't find the model ${c.model}. Set the ${c.key.replace("_API_KEY", "_MODEL")} secret.`);
+  }
   if (!res.ok) throw fail(502, `${c.name} error ${res.status}. Try again.`);
   const choice = json?.choices?.[0];
   if (choice?.finish_reason === "length") throw fail(502, "That recipe came out too long. Try something a bit simpler.");
@@ -229,11 +239,43 @@ async function compatEngine(c: Compat, prompt: string): Promise<{ recipe: Recipe
 
 const withGroq = (p: string) => compatEngine({ name: "Groq", url: GROQ_URL, key: "GROQ_API_KEY", model: GROQ_MODEL }, p);
 const withCerebras = (p: string) => compatEngine({ name: "Cerebras", url: "https://api.cerebras.ai/v1/chat/completions", key: "CEREBRAS_API_KEY", model: CEREBRAS_MODEL }, p);
-const withOpenRouter = (p: string) => compatEngine({
-  name: "OpenRouter", url: "https://openrouter.ai/api/v1/chat/completions", key: "OPENROUTER_API_KEY", model: OPENROUTER_MODEL, tokensParam: "max_tokens",
-  headers: { "X-Title": "bitrecipe" },
-  body: { provider: { require_parameters: true } }, // only send to providers that honour the recipe schema
-}, p);
+let orCache: { at: number; ids: string[] } | null = null;
+async function openRouterModels(): Promise<string[]> {
+  if (OPENROUTER_MODEL) return [OPENROUTER_MODEL];
+  if (orCache && Date.now() - orCache.at < 6 * 3600_000) return orCache.ids;
+  let ids: string[] = [];
+  try {
+    const res = await fetch("https://openrouter.ai/api/v1/models", { signal: AbortSignal.timeout(15_000) });
+    const list = ((await res.json())?.data ?? []) as { id: string; supported_parameters?: string[] }[];
+    const free = list.filter((m) => m.id.endsWith(":free"));
+    const so = free.filter((m) => m.supported_parameters?.includes("structured_outputs")).map((m) => m.id);
+    const rf = free.filter((m) => m.supported_parameters?.includes("response_format")).map((m) => m.id);
+    ids = [...OPENROUTER_PREFER.filter((id) => so.includes(id)), ...so, ...rf];
+  } catch { /* use the built-in list */ }
+  ids = [...new Set(ids.length ? ids : OPENROUTER_PREFER)];
+  orCache = { at: Date.now(), ids };
+  return ids;
+}
+async function withOpenRouter(p: string): Promise<{ recipe: Recipe; model: string }> {
+  const models = (await openRouterModels()).slice(0, 3);
+  let last: unknown;
+  for (const model of models) {
+    try {
+      return await compatEngine({
+        name: "OpenRouter", url: "https://openrouter.ai/api/v1/chat/completions", key: "OPENROUTER_API_KEY", model, tokensParam: "max_tokens",
+        headers: { "X-Title": "bitrecipe" },
+        body: { provider: { require_parameters: true } }, // only providers that honour the recipe schema
+      }, p);
+    } catch (e) {
+      last = e;
+      const code = (e as { status?: number }).status;
+      // model gone / busy / garbled: try the next free model; key or credit problems: stop
+      if (code === 503 || code === 422) throw e;
+      orCache = null;
+    }
+  }
+  throw last ?? fail(502, "OpenRouter has no free model available right now. Try another engine.");
+}
 
 // Fill anything a less strict engine left out, so the app always gets a valid recipe.
 function normalize(x: Record<string, unknown>): Recipe {
