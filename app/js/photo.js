@@ -41,3 +41,19 @@ export async function makePhoto(url) {
     return null; // unreadable image: the card just shows no photo
   }
 }
+
+// A photo of a recipe page for the AI to read: up to 1600 px on the long side,
+// JPEG, as base64 (no data: prefix). Big enough to read small print.
+export async function imageForAI(file) {
+  const url = URL.createObjectURL(file);
+  try {
+    const src = await loadBitmap(url);
+    const scale = Math.min(1, 1600 / Math.max(src.width, src.height));
+    const c = document.createElement('canvas');
+    c.width = Math.round(src.width * scale); c.height = Math.round(src.height * scale);
+    const ctx = c.getContext('2d');
+    ctx.imageSmoothingQuality = 'high';
+    ctx.drawImage(src, 0, 0, c.width, c.height);
+    return { mime: 'image/jpeg', data: c.toDataURL('image/jpeg', 0.82).split(',')[1], preview: c.toDataURL('image/jpeg', 0.5) };
+  } finally { URL.revokeObjectURL(url); }
+}

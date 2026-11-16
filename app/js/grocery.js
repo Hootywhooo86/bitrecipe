@@ -11,10 +11,17 @@ const AISLES = [
   ['Fruit & veg', /\b(onion|garlic|shallot|tomato|potato|carrot|celery|pepper(?!corn)|chili|chilli|lettuce|spinach|kale|cabbage|broccoli|cauliflower|zucchini|courgette|cucumber|mushroom|lemon|lime|orange|apple|banana|berr|avocado|ginger|herb|basil|parsley|cilantro|coriander|mint|thyme|rosemary|scallion|spring onion|leek|corn|peas|beans? sprout|squash|pumpkin|eggplant|aubergine)\b/i],
   ['Meat & fish', /\b(chicken|beef|pork|lamb|turkey|bacon|sausage|mince|steak|ham|salmon|tuna|cod|prawn|shrimp|fish|chorizo)\b/i],
   ['Dairy & eggs', /\b(milk|butter|cream|cheese|parmesan|mozzarella|cheddar|yogurt|yoghurt|egg|eggs|feta|ricotta)\b/i],
-  ['Bakery', /\b(bread|bun|tortilla|wrap|pita|baguette|roll)\b/i],
+  ['Bakery', /\b(bread|bun|tortilla|wrap|pita|baguette|roll|naan|bagel|croissant|brioche)\b/i],
+  ['Frozen', /\b(frozen|ice cream|puff pastry|filo|phyllo)\b/i],
+  ['Drinks', /\b(wine|beer|juice|soda|sparkling|coffee|tea|rum|vodka|whisk(e)?y|brandy|sake|mirin)\b/i],
   ['Spices & seasonings', /\b(salt|pepper|paprika|cumin|cinnamon|oregano|chili flakes|chilli flakes|nutmeg|turmeric|curry|spice|seasoning|vanilla|bay lea)\b/i],
-  ['Pantry', /\b(flour|sugar|rice|pasta|spaghetti|noodle|oil|vinegar|sauce|stock|broth|baking|yeast|oats|honey|syrup|chocolate|cocoa|beans|lentil|chickpea|can|tin|jar|nuts?|seeds?|soy|ketchup|mustard|mayo)\b/i],
+  ['Pantry', /\b(flour|sugar|rice|pasta|spaghetti|penne|macaroni|noodle|oil|vinegar|sauce|stock|broth|bouillon|baking|yeast|oats|honey|syrup|chocolate|cocoa|beans|lentil|chickpea|can|tin|jar|nuts?|almond|walnut|pecan|peanut|seeds?|sesame|soy|ketchup|mustard|mayo|cornstarch|cornflour|breadcrumb|panko|raisin|coconut|tahini|salsa|sriracha|gochujang|miso)\b/i],
+  ['Household', /\b(paper|towel|foil|wrap|bag|soap|detergent|sponge|napkin|tissue|battery|batteries)\b/i],
 ];
+
+// Things most kitchens always have: skipped from the list unless you say otherwise.
+export const DEFAULT_PANTRY = ['salt', 'pepper', 'black pepper', 'oil', 'olive oil', 'vegetable oil', 'water', 'sugar', 'flour'];
+export const PANTRY_AISLE = 'Already in your pantry';
 
 export function aisleOf(item) {
   for (const [name, re] of AISLES) if (re.test(item)) return name;
@@ -28,7 +35,7 @@ export function keyOf(item) {
 }
 
 // entries: [{ rid, servings, skip: [ingredientId] }]
-export function buildList(recipes, entries, manual = [], system = 'orig') {
+export function buildList(recipes, entries, manual = [], system = 'orig', pantry = new Set()) {
   const groups = new Map();
   for (const e of entries) {
     const r = recipes.find((x) => x.id === e.rid);
@@ -70,13 +77,14 @@ export function buildList(recipes, entries, manual = [], system = 'orig') {
     if (!parts.length && g.missing) parts.push('?? amount');
     if (!parts.length && g.loose) parts.push('some');
     const name = g.counts[''] ? itemText({ item: g.item, unit: '', qty: g.counts[''] }) : g.item;
-    return { key: g.key, item: name, amount: parts.join(' + '), missing: g.missing && parts.length === 1 && parts[0].startsWith('??'), from: [...g.from], aisle: aisleOf(g.item) };
+    const inPantry = pantry.has(g.key);
+    return { key: g.key, item: name, amount: parts.join(' + '), missing: g.missing && parts.length === 1 && parts[0].startsWith('??'), from: [...g.from], aisle: inPantry ? PANTRY_AISLE : aisleOf(g.item), pantry: inPantry };
   });
   for (const m of manual) lines.push({ key: 'm:' + m.id, item: m.text, amount: '', from: ['added by you'], aisle: aisleOf(m.text), manual: m.id });
-  const order = [...AISLES.map((a) => a[0]), 'Other'];
+  const order = [...AISLES.map((a) => a[0]), 'Other', PANTRY_AISLE];
   return order.map((aisle) => ({ aisle, lines: lines.filter((l) => l.aisle === aisle).sort((a, b) => a.item.localeCompare(b.item)) })).filter((s) => s.lines.length);
 }
 
 export function listAsText(sections, checked) {
-  return sections.map((s) => `${s.aisle.toUpperCase()}\n` + s.lines.map((l) => `${checked[l.key] ? '☑' : '☐'} ${l.amount ? l.amount + ' ' : ''}${l.item}`).join('\n')).join('\n\n') + '\n\n— made with bitrecipe';
+  return sections.filter((s) => s.aisle !== PANTRY_AISLE).map((s) => `${s.aisle.toUpperCase()}\n` + s.lines.map((l) => `${checked[l.key] ? '☑' : '☐'} ${l.amount ? l.amount + ' ' : ''}${l.item}`).join('\n')).join('\n\n') + '\n\n— made with bitrecipe';
 }

@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="sc_list">Grocery list</string>
+    <string name="sc_list_long">Open my grocery list</string>
+    <string name="sc_ai">AI chef</string>
+    <string name="sc_ai_long">Make a recipe with AI</string>
+    <string name="sc_plan">Meal plan</string>
+    <string name="sc_plan_long">This week’s meal plan</string>
+    <string name="sc_last">Last recipe</string>
+    <string name="sc_last_long">Open my last recipe</string>
+</resources>

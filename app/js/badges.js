@@ -2,7 +2,7 @@
 // few small actions; badges unlock from stats. Both feed 128bitlife later
 // through the family event outbox.
 
-export const XP = { cook: 50, save: 10, version: 15, grocery: 5, write: 25 };
+export const XP = { cook: 50, save: 10, version: 15, grocery: 5, write: 25, rate: 5, note: 5 };
 
 export const LEVELS = ['Kitchen Newbie', 'Prep Cook', 'Line Cook', 'Sous Chef', 'Head Chef', 'Executive Chef', 'Pixel Legend'];
 
@@ -26,6 +26,12 @@ export const BADGES = [
   { id: 'timers', name: 'Timer Lord', desc: 'Run 10 timers', test: (s) => s.timers >= 10 },
   { id: 'shopper', name: 'List Maker', desc: 'Build a grocery list', test: (s) => s.lists >= 1 },
   { id: 'multitask', name: 'Multitasker', desc: 'Cook a recipe with 3 tracks', test: (s) => s.threeTrack >= 1 },
+  { id: 'streak3', name: 'Warming Up', desc: 'Cook 3 days in a row', test: (s) => s.bestStreak >= 3 },
+  { id: 'streak7', name: 'On Fire', desc: 'Cook 7 days in a row', test: (s) => s.bestStreak >= 7 },
+  { id: 'quests10', name: 'Quest Master', desc: 'Finish 10 daily quests', test: (s) => s.questsDone >= 10 },
+  { id: 'critic', name: 'Food Critic', desc: 'Rate 5 recipes', test: (s) => s.rated >= 5 },
+  { id: 'planner', name: 'Meal Planner', desc: 'Plan 7 meals', test: (s) => s.planned >= 7 },
+  { id: 'photo', name: 'Page Turner', desc: 'Turn a photo into a recipe', test: (s) => s.photos >= 1 },
 ];
 
 export function statsFrom(db) {
@@ -41,6 +47,11 @@ export function statsFrom(db) {
     threeTrack: st.threeTrack || 0,
     written: st.written || 0,
     ai: db.recipes.filter((r) => r.source?.platform === 'ai').length,
+    bestStreak: db.streak?.best || 0,
+    questsDone: st.questsDone || 0,
+    rated: db.recipes.filter((r) => r.rating).length,
+    planned: st.did_plan || 0,
+    photos: db.recipes.filter((r) => r.source?.platform === 'photo').length,
   };
 }
 

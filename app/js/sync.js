@@ -26,6 +26,10 @@ const profileOf = (db) => ({
   fridge: db.fridge || null,
   aiModels: db.ai?.models || {},
   familyName: db.family?.name || '',
+  plan: db.plan || null,
+  pantry: db.prefs.pantry || null,
+  streak: db.streak || null,
+  quests: db.quests || null,
 });
 
 function localItems(db) {
@@ -71,7 +75,16 @@ function applyRemote(db, row, localNewer = false) {
     const stats = { ...(db.stats || {}) };
     for (const [k, v] of Object.entries(d.stats || {})) stats[k] = Math.max(stats[k] || 0, v || 0);
     db.stats = stats;
-    if (localNewer) return; // keep this phone's newer colours / prefs / boards
+    // streak: the one with the latest cook day (then the longer one) wins
+    if (d.streak && (!db.streak || d.streak.last > db.streak.last || (d.streak.last === db.streak.last && d.streak.n > db.streak.n))) db.streak = { ...d.streak, best: Math.max(d.streak.best || 0, db.streak?.best || 0) };
+    // today's quests: newer day wins, same day keeps every claimed quest
+    if (d.quests?.day) {
+      if (!db.quests || d.quests.day > db.quests.day) db.quests = d.quests;
+      else if (d.quests.day === db.quests.day) { db.quests.claimed = { ...d.quests.claimed, ...db.quests.claimed }; db.quests.bonus = db.quests.bonus || d.quests.bonus; }
+    }
+    if (localNewer) return;
+    if (d.plan) db.plan = d.plan;
+    if (d.pantry) db.prefs.pantry = d.pantry; // keep this phone's newer colours / prefs / boards
     if (d.theme) db.theme = d.theme;
     if (d.fridge) db.fridge = d.fridge;
     if (d.aiModels) { db.ai ||= { engine: 'gemini', diet: '', servings: 4, time: '', useFridge: false }; db.ai.models = d.aiModels; }

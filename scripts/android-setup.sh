@@ -65,6 +65,21 @@ open(p, 'w').write(s)
 PY
 fi
 
+# App shortcuts (long-press the icon): Grocery list, AI chef, Meal plan, Last recipe.
+if ! grep -q 'android.app.shortcuts' "$MANIFEST"; then
+  python3 - "$MANIFEST" <<'PY'
+import sys
+p = sys.argv[1]
+s = open(p).read()
+meta = '''
+            <meta-data android:name="android.app.shortcuts" android:resource="@xml/shortcuts" />
+'''
+i = s.index('</activity>')
+s = s[:i] + meta + '        ' + s[i:]
+open(p, 'w').write(s)
+PY
+fi
+
 # Resize (not cover) the app when the keyboard opens; MainActivity pads for it.
 if ! grep -q 'windowSoftInputMode' "$MANIFEST"; then
   sed -i 's|android:name=".MainActivity"|android:name=".MainActivity"\n            android:windowSoftInputMode="adjustResize"|' "$MANIFEST"

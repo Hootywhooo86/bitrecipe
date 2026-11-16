@@ -347,3 +347,64 @@ html.calm *, html.calm *::before, html.calm *::after { animation: none !importan
 .modelpick { gap: 6px; flex-wrap: nowrap; margin-top: 4px; }
 .modelpick select { padding: 8px; font-size: 13px; min-width: 0; }
 .modelpick .btn { padding: 10px 12px; font-size: 8px; }
+
+/* ---------- daily quests + streaks ---------- */
+.quests .qlist { list-style: none; display: grid; gap: 6px; }
+.quests .qlist li { display: flex; align-items: center; gap: 10px; font-size: 14px; }
+.quests .qlist .box { width: 22px; height: 22px; flex-shrink: 0; border: 3px solid var(--edge); display: grid; place-items: center; font-weight: 900; font-size: 12px; }
+.quests .qlist li.done .box { background: var(--good); border-color: var(--good-deep); color: #08140c; }
+.quests .qlist li.done .grow { text-decoration: line-through; color: var(--muted); }
+.quests .qxp { font-family: var(--px); font-size: 8px; color: var(--accent2); }
+.streak { font-family: var(--px); font-size: 9px; color: var(--accent); animation: pop .5s steps(3); }
+.tonight { margin-top: 10px; padding-top: 8px; border-top: 2px dashed var(--edge); font-weight: 700; }
+.tonight a { color: var(--accent2); }
+
+/* ---------- ratings + notes ---------- */
+.rate { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; margin: 2px 0 8px; }
+.win .rate { justify-content: center; margin-top: 4px; }
+.stars { display: inline-flex; gap: 2px; }
+.stars button { background: none; border: none; font-size: 26px; line-height: 1; color: var(--edge); padding: 2px; }
+.stars button.on { color: var(--accent2); }
+.stars-sm { color: var(--accent2); letter-spacing: -1px; }
+.win textarea { min-height: 70px; margin-top: 8px; text-align: left; }
+.note { position: relative; padding: 8px 36px 8px 0; border-bottom: 2px dashed var(--edge); margin-bottom: 8px; }
+.note p { margin-top: 2px; }
+.note .x, .planrow .x { width: 32px; height: 32px; background: var(--bg); border: 2px solid var(--edge); color: var(--muted); }
+.note .x { position: absolute; right: 0; top: 8px; }
+
+/* ---------- nutrition ---------- */
+.stats.nutri { grid-template-columns: repeat(4, 1fr); margin-bottom: 8px; }
+
+/* ---------- swaps ---------- */
+.checklist li .swapbtn { margin-left: auto; flex-shrink: 0; width: 34px; height: 34px; background: var(--bg); border: 2px solid var(--edge); color: var(--muted); font-size: 15px; }
+.swaprow { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
+.sheet { position: fixed; inset: 0; z-index: 60; background: #000a; display: flex; align-items: flex-end; justify-content: center; padding: 0 8px env(safe-area-inset-bottom); }
+.sheetbox { width: 100%; max-width: 560px; max-height: 80vh; overflow-y: auto; background: var(--panel); border: 3px solid var(--edge); border-bottom: none; padding: 16px; animation: slideUp .2s steps(4); }
+@keyframes slideUp { from { transform: translateY(40px); opacity: 0; } to { transform: none; opacity: 1; } }
+.swapopt { padding: 10px 0; border-bottom: 2px dashed var(--edge); }
+.swapopt .btn { margin-top: 8px; padding: 10px 12px; font-size: 9px; }
+
+/* ---------- photo import ---------- */
+.pages { display: flex; gap: 8px; flex-wrap: wrap; }
+.page { position: relative; width: 72px; height: 96px; border: 3px solid var(--edge); overflow: hidden; }
+.page img { width: 100%; height: 100%; object-fit: cover; }
+.page .x { position: absolute; top: 2px; right: 2px; width: 24px; height: 24px; background: var(--bg); border: 2px solid var(--edge); color: var(--ink); }
+.src.photo { background: var(--lane2); color: #08140c; border-color: transparent; }
+
+/* ---------- meal plan ---------- */
+.weeknav { margin-bottom: 12px; gap: 8px; }
+.weeknav .btn { padding: 10px 14px; }
+.planday { padding: 12px 14px; }
+.planday.now { border-color: var(--accent2); }
+.planrow { display: flex; align-items: center; gap: 8px; padding: 8px 0; border-bottom: 2px dashed var(--edge); flex-wrap: wrap; }
+.planrow a { display: flex; align-items: center; gap: 8px; color: var(--ink); font-weight: 700; text-decoration: none; flex: 1; min-width: 0; }
+.planrow .x { margin-left: auto; }
+.mini { width: 40px; height: 30px; object-fit: cover; border: 2px solid var(--edge); }
+.addsel { margin-top: 8px; padding: 8px; font-size: 14px; color: var(--muted); }
+
+/* ---------- smarter grocery list ---------- */
+.pantry summary { cursor: pointer; list-style: none; }
+.pantry summary::-webkit-details-marker { display: none; }
+.pantry[open] summary { margin-bottom: 8px; }
+.pantry li { opacity: .75; }
+.sharedbar { margin-bottom: 12px; }

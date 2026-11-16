@@ -206,7 +206,8 @@ async function withClaude(prompt: string, pick?: string): Promise<{ recipe: Reci
 // asks again with the schema written into the instructions. normalize() then
 // guarantees a valid recipe either way.
 type Compat = { name: string; url: string; key: string; model: string; tokensParam?: string; headers?: Record<string, string>; body?: Record<string, unknown> };
-async function compatEngine(c: Compat, prompt: string): Promise<{ recipe: Recipe; model: string }> {
+type Img = { mime: string; data: string };
+async function compatEngine(c: Compat, prompt: string, images: Img[] = []): Promise<{ recipe: Recipe; model: string }> {
   const call = async (strictSchema: boolean) => {
     const system = strictSchema ? SYSTEM : `${SYSTEM}\n\nReply with only a JSON object matching this JSON Schema:\n${JSON.stringify(RECIPE_SCHEMA)}`;
     try {
@@ -216,7 +217,7 @@ async function compatEngine(c: Compat, prompt: string): Promise<{ recipe: Recipe
         body: JSON.stringify({
           model: c.model,
           [c.tokensParam ?? "max_completion_tokens"]: 16000,
-          messages: [{ role: "system", content: system }, { role: "user", content: prompt }],
+          messages: [{ role: "system", content: system }, { role: "user", content: images.length ? [...images.map((i) => ({ type: "image_url", image_url: { url: `data:${i.mime};base64,${i.data}` } })), { type: "text", text: prompt }] : prompt }],
           response_format: strictSchema
             ? { type: "json_schema", json_schema: { name: "bitrecipe_recipe", strict: true, schema: RECIPE_SCHEMA } }
             : { type: "json_object" },
@@ -269,8 +270,10 @@ async function openRouterModels(): Promise<string[]> {
   orCache = { at: Date.now(), ids };
   return ids;
 }
-async function withOpenRouter(p: string, m?: string): Promise<{ recipe: Recipe; model: string }> {
-  const models = m ? [m] : (await openRouterModels()).slice(0, 3);
+async function withOpenRouter(p: string, m?: string, images: Img[] = []): Promise<{ recipe: Recipe; model: string }> {
+  // photos need a model that can see: the free "-vl" (vision) models first
+  const all = await openRouterModels();
+  const models = m ? [m] : (images.length ? [...all.filter((id) => /-vl|vision|gemma-3|llama-4/i.test(id)), ...all] : all).slice(0, 3);
   let last: unknown;
   for (const model of models) {
     try {
@@ -278,7 +281,7 @@ async function withOpenRouter(p: string, m?: string): Promise<{ recipe: Recipe; 
         name: "OpenRouter", url: "https://openrouter.ai/api/v1/chat/completions", key: "OPENROUTER_API_KEY", model, tokensParam: "max_tokens",
         headers: { "X-Title": "bitrecipe" },
         body: { provider: { require_parameters: true } }, // only providers that honour the recipe schema
-      }, p);
+      }, p, images);
     } catch (e) {
       last = e;
       const code = (e as { status?: number }).status;
@@ -310,6 +313,7 @@ function normalize(x: Record<string, unknown>): Recipe {
     timer: s.timer && Number(s.timer.min) > 0 ? { min: Math.round(Number(s.timer.min)), label: String(s.timer.label || "Timer") } : null, wait: !!s.wait,
   }));
   r.tips = arr(r.tips).map(String).slice(0, 3);
+  if (/^not a recipe$/i.test(r.title.trim())) throw fail(422, "That photo doesn't look like a recipe. Try a clearer shot of the page.");
   if (!r.ingredients.length || !r.steps.length) throw fail(502, "The AI chef sent an incomplete recipe. Try again.");
   return r as Recipe;
 }
@@ -336,12 +340,12 @@ async function geminiModels(): Promise<{ all: string[]; pick: string; ranked: st
   return gmCache;
 }
 
-async function withGemini(prompt: string, m?: string): Promise<{ recipe: Recipe; model: string }> {
-  if (m) return geminiWith(m, prompt);
+async function withGemini(prompt: string, m?: string, images: Img[] = []): Promise<{ recipe: Recipe; model: string }> {
+  if (m) return geminiWith(m, prompt, images);
   const ranked = (await geminiModels()).ranked.slice(0, 3);
   let last: unknown;
   for (const model of ranked) {
-    try { return await geminiWith(model, prompt); } catch (e) {
+    try { return await geminiWith(model, prompt, images); } catch (e) {
       last = e;
       if (!/isn't available/.test((e as Error).message)) throw e; // only a missing model moves on
     }
@@ -358,7 +362,7 @@ function geminiThinking(model: string): Record<string, unknown> | null {
   return null;
 }
 
-async function geminiWith(model: string, prompt: string): Promise<{ recipe: Recipe; model: string }> {
+async function geminiWith(model: string, prompt: string, images: Img[] = []): Promise<{ recipe: Recipe; model: string }> {
   let thinking = geminiThinking(model);
   const call = async (strictSchema: boolean) => {
     const system = strictSchema ? SYSTEM : `${SYSTEM}\n\nReply with only a JSON object matching this JSON Schema:\n${JSON.stringify(RECIPE_SCHEMA)}`;
@@ -368,7 +372,7 @@ async function geminiWith(model: string, prompt: string): Promise<{ recipe: Reci
         headers: { "x-goog-api-key": Deno.env.get("GEMINI_API_KEY")!, "Content-Type": "application/json" },
         body: JSON.stringify({
           systemInstruction: { parts: [{ text: system }] },
-          contents: [{ role: "user", parts: [{ text: prompt }] }],
+          contents: [{ role: "user", parts: [...images.map((i) => ({ inline_data: { mime_type: i.mime, data: i.data } })), { text: prompt }] }],
           generationConfig: {
             maxOutputTokens: 16000,
             ...(thinking ? { thinkingConfig: thinking } : {}),
@@ -466,11 +470,11 @@ async function testModel(engine: Engine, model: string | undefined, test: string
 }
 
 // Run one engine with a time cap; never throws.
-async function testLike(engine: Engine, model: string | undefined, prompt: string, capMs: number) {
+async function testLike(engine: Engine, model: string | undefined, prompt: string, capMs: number, images: Img[] = []) {
   let timer: ReturnType<typeof setTimeout> | undefined;
   try {
     const { recipe, model: used } = await Promise.race([
-      ENGINES[engine].run(prompt, model),
+      (ENGINES[engine].run as (p: string, m?: string, i?: Img[]) => Promise<{ recipe: Recipe; model: string }>)(prompt, model, images),
       new Promise<never>((_, rej) => { timer = setTimeout(() => rej(fail(504, `${engine} took too long.`)), Math.max(5_000, capMs)); }),
     ]).finally(() => clearTimeout(timer));
     return { ok: true as const, recipe, model: used };
@@ -506,6 +510,140 @@ async function isUser(auth: string): Promise<boolean> {
     headers: { apikey: Deno.env.get("SUPABASE_ANON_KEY")!, Authorization: auth },
   }).catch(() => null);
   return !!res?.ok;
+}
+
+
+// ---------- small helpers: swaps, nutrition, meal plans ----------
+// Short JSON answers from the fastest engine that's set up (Groq first, then
+// Gemini, OpenRouter, Cerebras). They don't use the daily recipe allowance.
+const strictObj = (props: Record<string, unknown>) => ({ type: "object", additionalProperties: false, required: Object.keys(props), properties: props });
+const SWAP_SCHEMA = strictObj({
+  swaps: { type: "array", items: strictObj({ qty: NUM_OR_NULL, unit: { type: "string", enum: UNITS }, item: { type: "string" }, prep: { type: "string" }, note: { type: "string" } }) },
+});
+const NUTRITION_SCHEMA = strictObj({
+  calories: { type: "number" }, protein: { type: "number" }, carbs: { type: "number" }, fat: { type: "number" },
+  fiber: { type: "number" }, sugar: { type: "number" }, sodium: { type: "number" }, note: { type: "string" },
+});
+const PLAN_SCHEMA = strictObj({
+  days: { type: "array", items: strictObj({ day: { type: "integer" }, recipeId: { type: "string" }, why: { type: "string" } }) },
+});
+
+async function askCompat(engine: "groq" | "cerebras" | "openrouter", system: string, user: string, schema: Record<string, unknown>) {
+  const [url, key, model] = engine === "groq" ? [GROQ_URL, "GROQ_API_KEY", GROQ_MODEL]
+    : engine === "cerebras" ? ["https://api.cerebras.ai/v1/chat/completions", "CEREBRAS_API_KEY", CEREBRAS_MODEL]
+    : ["https://openrouter.ai/api/v1/chat/completions", "OPENROUTER_API_KEY", (await openRouterModels())[0]];
+  const call = (strict: boolean) => fetch(url, {
+    method: "POST",
+    headers: { Authorization: `Bearer ${Deno.env.get(key)}`, "Content-Type": "application/json", ...(engine === "openrouter" ? { "X-Title": "bitrecipe" } : {}) },
+    body: JSON.stringify({
+      model, [engine === "openrouter" ? "max_tokens" : "max_completion_tokens"]: 4000,
+      messages: [{ role: "system", content: strict ? system : `${system}\n\nReply with only JSON matching this schema:\n${JSON.stringify(schema)}` }, { role: "user", content: user }],
+      response_format: strict ? { type: "json_schema", json_schema: { name: "answer", strict: true, schema } } : { type: "json_object" },
+    }),
+    signal: AbortSignal.timeout(40_000),
+  });
+  let res = await call(true);
+  if (res.status === 400 || res.status === 422) res = await call(false);
+  if (!res.ok) throw fail(502, `${engine} error ${res.status}`);
+  const j = await res.json();
+  const text = String(j?.choices?.[0]?.message?.content ?? "").trim().replace(/^```(?:json)?\s*|\s*```$/g, "");
+  return { data: JSON.parse(text), engine, model: j?.model ?? model };
+}
+
+async function askGemini(system: string, user: string, schema: Record<string, unknown>) {
+  let last: unknown;
+  for (const model of (await geminiModels()).ranked.slice(0, 2)) {
+    const thinking = geminiThinking(model);
+    const res = await fetch(GEMINI_URL(model), {
+      method: "POST",
+      headers: { "x-goog-api-key": Deno.env.get("GEMINI_API_KEY")!, "Content-Type": "application/json" },
+      body: JSON.stringify({
+        systemInstruction: { parts: [{ text: system }] },
+        contents: [{ role: "user", parts: [{ text: user }] }],
+        generationConfig: { maxOutputTokens: 4000, responseMimeType: "application/json", responseJsonSchema: schema, ...(thinking ? { thinkingConfig: thinking } : {}) },
+      }),
+      signal: AbortSignal.timeout(40_000),
+    });
+    const j = await res.json().catch(() => null);
+    if (!res.ok) { last = fail(502, `gemini error ${res.status}`); if (res.status === 404 || res.status === 400) continue; throw last; }
+    const text = (j?.candidates?.[0]?.content?.parts ?? []).map((p: { text?: string }) => p.text ?? "").join("").trim().replace(/^```(?:json)?\s*|\s*```$/g, "");
+    return { data: JSON.parse(text), engine: "gemini", model: j?.modelVersion ?? model };
+  }
+  throw last ?? fail(502, "gemini had no model");
+}
+
+async function askJSON(system: string, user: string, schema: Record<string, unknown>) {
+  const avail = configured();
+  const errors: string[] = [];
+  for (const e of ["groq", "gemini", "openrouter", "cerebras"] as const) {
+    if (!avail[e]) continue;
+    try { return e === "gemini" ? await askGemini(system, user, schema) : await askCompat(e, system, user, schema); }
+    catch (err) { errors.push(`${e}: ${(err as Error).message}`); log({ helper: e, ok: false, error: (err as Error).message.slice(0, 160) }); }
+  }
+  throw fail(502, errors.length ? `The AI helpers are busy right now. Try again in a minute. (${errors.join("; ")})` : "No AI engine is set up on the server.");
+}
+
+const recipeText = (r: Record<string, unknown>) => JSON.stringify(r).slice(0, 9000);
+
+async function helperTask(body: Record<string, unknown>) {
+  const task = body.task;
+  if (task === "swap") {
+    const r = (body.recipe ?? {}) as Record<string, unknown>;
+    const out = await askJSON(
+      "You are a practical home-cooking assistant. Suggest 2 or 3 ingredient substitutes a home cook is likely to have. Give amounts that replace the original amount in this recipe, a short prep note if needed, and a one-sentence note on how it changes the dish. Respect any diet notes.",
+      `Recipe: ${recipeText({ title: r.title, ingredients: r.ingredients })}\nReplace this ingredient: ${String(body.ingredient ?? "").slice(0, 200)}\nDiet / avoid: ${String(body.diet ?? "").slice(0, 200) || "none"}`,
+      SWAP_SCHEMA);
+    const swaps = ((out.data as { swaps?: unknown[] }).swaps ?? []).slice(0, 3).map((x) => {
+      const w = x as Record<string, unknown>;
+      return { qty: typeof w.qty === "number" ? w.qty : null, unit: UNITS.includes(String(w.unit)) ? String(w.unit) : "", item: String(w.item || ""), prep: String(w.prep || ""), note: String(w.note || "") };
+    }).filter((w) => w.item);
+    return { swaps, engine: out.engine, model: out.model };
+  }
+  if (task === "nutrition") {
+    const r = (body.recipe ?? {}) as Record<string, unknown>;
+    const out = await askJSON(
+      "You are a nutrition estimator. Estimate nutrition PER SERVING for the recipe, using typical values for each ingredient and the given number of servings. Ingredients without amounts: assume a typical amount. Give calories in kcal; protein, carbs, fat, fiber and sugar in grams; sodium in mg. Round sensibly. In note, say in one short sentence what the estimate assumes.",
+      recipeText({ title: r.title, servings: r.servings, ingredients: r.ingredients }),
+      NUTRITION_SCHEMA);
+    const d = out.data as Record<string, unknown>;
+    const n = (k: string) => Math.max(0, Math.round(Number(d[k]) || 0));
+    return { nutrition: { calories: n("calories"), protein: n("protein"), carbs: n("carbs"), fat: n("fat"), fiber: n("fiber"), sugar: n("sugar"), sodium: n("sodium"), note: String(d.note || "") }, engine: out.engine, model: out.model };
+  }
+  if (task === "plan") {
+    const list = (Array.isArray(body.recipes) ? body.recipes : []).slice(0, 150) as Record<string, unknown>[];
+    const ids = new Set(list.map((x) => String(x.id)));
+    const days = (Array.isArray(body.days) ? body.days : []).slice(0, 14).map((x) => String(x).slice(0, 40));
+    if (!list.length) throw fail(400, "Save a few recipes first, then the AI can plan with them.");
+    const out = await askJSON(
+      "You plan home meals. Pick ONE saved recipe for each day listed, using only the recipe ids given. Follow the cook's wishes. Vary proteins and cuisines across the week, avoid repeats unless there are too few recipes, and put quicker meals on busy days. Days are numbered from 0 in the order given. In why, give a 3-8 word reason.",
+      `Days to plan: ${days.map((d, i) => `${i}=${d}`).join(", ")}\nWishes: ${String(body.prompt ?? "").slice(0, 400) || "a good, varied week of dinners"}\nSaved recipes (id | title | minutes | tags | main ingredients):\n${list.map((x) => `${x.id} | ${String(x.title).slice(0, 80)} | ${x.minutes ?? "?"} | ${(Array.isArray(x.tags) ? x.tags : []).join(",")} | ${String(x.main ?? "").slice(0, 120)}`).join("\n")}`,
+      PLAN_SCHEMA);
+    const plan = ((out.data as { days?: unknown[] }).days ?? []).map((x) => x as Record<string, unknown>)
+      .filter((x) => ids.has(String(x.recipeId)) && Number.isInteger(x.day) && (x.day as number) >= 0 && (x.day as number) < days.length)
+      .map((x) => ({ day: x.day as number, recipeId: String(x.recipeId), why: String(x.why || "").slice(0, 80) }));
+    return { plan, engine: out.engine, model: out.model };
+  }
+  throw fail(400, "Unknown task.");
+}
+
+const PHOTO_PROMPT = `These photos show a recipe (a cookbook page, a handwritten card or a screenshot). Copy that recipe into bitrecipe's format.
+- Keep the recipe's own title, amounts, ingredients, servings and method. Don't invent or "improve" anything; only split the method into clear steps and assign tracks.
+- If several photos are given, they are pages of the same recipe, in order.
+- If an amount can't be read, use qty null (don't guess).
+- If the photos don't show a recipe, return the title "Not a recipe" with empty ingredients and steps.`;
+
+function readImages(x: unknown): Img[] {
+  if (!Array.isArray(x)) return [];
+  let total = 0;
+  const out: Img[] = [];
+  for (const i of x.slice(0, 4)) {
+    const mime = String((i as Img)?.mime ?? ""), data = String((i as Img)?.data ?? "");
+    if (!/^image\/(jpeg|png|webp)$/.test(mime) || !/^[A-Za-z0-9+/=]+$/.test(data)) continue;
+    total += data.length;
+    if (total > 8_000_000) throw fail(413, "Those photos are too big. Try fewer pages.");
+    out.push({ mime, data });
+  }
+  return out;
 }
 
 Deno.serve(async (req) => {
@@ -546,34 +684,57 @@ Deno.serve(async (req) => {
     const picks = Object.fromEntries(ORDER.filter((e) => typeof chosen[e] === "string" && MODEL_ID.test(chosen[e] as string)).map((e) => [e, chosen[e] as string]));
     return reply(200, { check: await checkEngines(picks), limit: DAILY_LIMIT });
   }
-  if (!String(body.prompt ?? "").trim()) return reply(400, { error: "Say what you'd like to make." });
+  // swaps, nutrition and meal plans: quick answers, no daily allowance used
+  if (["swap", "nutrition", "plan"].includes(String(body.task))) {
+    if (!(await isUser(auth))) return reply(401, { error: "Sign in to your 128bit account to use the AI helpers." });
+    const t1 = Date.now();
+    try {
+      const out = await helperTask(body);
+      log({ task: body.task, engine: out.engine, model: out.model, ok: true, ms: Date.now() - t1 });
+      return reply(200, out);
+    } catch (e) {
+      log({ task: body.task, ok: false, ms: Date.now() - t1, error: (e as Error).message.slice(0, 200) });
+      if (e instanceof SyntaxError) return reply(502, { error: "The answer came back garbled. Try again." });
+      return reply((e as { status?: number }).status ?? 500, { error: (e as Error).message });
+    }
+  }
 
-  const want = ORDER.find((e) => e === body.engine) ?? "gemini";
+  const photo = body.task === "photo";
+  let images: Img[] = [];
+  if (photo) {
+    try { images = readImages(body.images); } catch (e) { return reply(413, { error: (e as Error).message }); }
+    if (!images.length) return reply(400, { error: "Add a photo of the recipe first." });
+  } else if (!String(body.prompt ?? "").trim()) return reply(400, { error: "Say what you'd like to make." });
+
   const avail = configured();
+  // photos need an engine that can see: Gemini, then OpenRouter's vision models
+  const want = photo ? "gemini" : ORDER.find((e) => e === body.engine) ?? "gemini";
+  const canUse = (e: Engine) => avail[e] && (!photo || e === "gemini" || e === "openrouter");
   // use the engine asked for; if it isn't set up, use whichever one is
-  const engine = avail[want] ? want : ORDER.find((e) => avail[e]) ?? null;
-  if (!engine) return reply(503, { error: "The AI chef isn't connected yet (add an AI key such as GEMINI_API_KEY or GROQ_API_KEY in Supabase)." });
+  const engine = canUse(want) ? want : ORDER.find((e) => canUse(e)) ?? null;
+  if (!engine) return reply(503, { error: photo ? "Reading photos needs GEMINI_API_KEY (or OPENROUTER_API_KEY) on the server." : "The AI chef isn't connected yet (add an AI key such as GEMINI_API_KEY or GROQ_API_KEY in Supabase)." });
 
   let remaining: number;
   try { remaining = await takeQuota(auth); } catch (e) {
     return reply((e as { status?: number }).status ?? 500, { error: (e as Error).message });
   }
   const t0 = Date.now();
-  const prompt = buildPrompt(body);
-  const pick = typeof body.model === "string" && MODEL_ID.test(body.model) && engine === want ? body.model : undefined;
+  const prompt = photo ? PHOTO_PROMPT + (body.prompt ? `\nNotes from the cook: ${String(body.prompt).slice(0, 300)}` : "") : buildPrompt(body);
+  const pick = typeof body.model === "string" && MODEL_ID.test(body.model) && engine === want && !photo ? body.model : undefined;
   const backup = BACKUP[engine] && avail[BACKUP[engine]!] && body.noBackup !== true ? (BACKUP[engine] as Engine) : null;
   try {
     // with a backup engine, give the first engine 45 s so both fit well inside Supabase's 150 s limit
-    const first = await testLike(engine, pick, prompt, backup ? 45_000 : 110_000);
+    const first = await testLike(engine, pick, prompt, backup ? 45_000 : 110_000, images);
+    if (first.ok && photo && !first.recipe!.steps.length) throw fail(422, "That photo doesn't look like a recipe. Try a clearer shot of the page.");
     if (first.ok) {
-      log({ engine, model: first.model, ok: true, ms: Date.now() - t0 });
+      log({ engine, model: first.model, ok: true, ms: Date.now() - t0, photo });
       return reply(200, { recipe: tidy(first.recipe!), remaining, engine, model: first.model });
     }
     log({ engine, model: pick, ok: false, ms: Date.now() - t0, error: first.error?.slice(0, 200) });
     // refusals and key problems shouldn't hop engines; anything else falls back once
     if (!backup || first.status === 422 || first.status === 401) throw first.err;
     const bm = body.models && typeof body.models === "object" ? (body.models as Record<string, unknown>)[backup] : undefined;
-    const second = await testLike(backup, typeof bm === "string" && MODEL_ID.test(bm) ? bm : undefined, prompt, Math.min(75_000, 120_000 - (Date.now() - t0)));
+    const second = await testLike(backup, typeof bm === "string" && MODEL_ID.test(bm) ? bm : undefined, prompt, Math.min(75_000, 120_000 - (Date.now() - t0)), images);
     if (!second.ok) {
       log({ engine: backup, ok: false, ms: Date.now() - t0, error: second.error?.slice(0, 200) });
       throw fail(502, `${first.error} Then the backup (${backup}) failed too: ${second.error}`);

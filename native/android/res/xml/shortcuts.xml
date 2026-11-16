@@ -1,0 +1,24 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Long-press the bitrecipe icon for these. -->
+<shortcuts xmlns:android="http://schemas.android.com/apk/res/android">
+    <shortcut android:shortcutId="list" android:enabled="true" android:icon="@drawable/sc_list"
+        android:shortcutShortLabel="@string/sc_list" android:shortcutLongLabel="@string/sc_list_long">
+        <intent android:action="android.intent.action.VIEW" android:data="bitrecipe://list"
+            android:targetPackage="com.bit128.bitrecipe.app" android:targetClass="com.bit128.bitrecipe.MainActivity" />
+    </shortcut>
+    <shortcut android:shortcutId="ai" android:enabled="true" android:icon="@drawable/sc_ai"
+        android:shortcutShortLabel="@string/sc_ai" android:shortcutLongLabel="@string/sc_ai_long">
+        <intent android:action="android.intent.action.VIEW" android:data="bitrecipe://ai"
+            android:targetPackage="com.bit128.bitrecipe.app" android:targetClass="com.bit128.bitrecipe.MainActivity" />
+    </shortcut>
+    <shortcut android:shortcutId="plan" android:enabled="true" android:icon="@drawable/sc_plan"
+        android:shortcutShortLabel="@string/sc_plan" android:shortcutLongLabel="@string/sc_plan_long">
+        <intent android:action="android.intent.action.VIEW" android:data="bitrecipe://plan"
+            android:targetPackage="com.bit128.bitrecipe.app" android:targetClass="com.bit128.bitrecipe.MainActivity" />
+    </shortcut>
+    <shortcut android:shortcutId="last" android:enabled="true" android:icon="@drawable/sc_last"
+        android:shortcutShortLabel="@string/sc_last" android:shortcutLongLabel="@string/sc_last_long">
+        <intent android:action="android.intent.action.VIEW" android:data="bitrecipe://last"
+            android:targetPackage="com.bit128.bitrecipe.app" android:targetClass="com.bit128.bitrecipe.MainActivity" />
+    </shortcut>
+</shortcuts>

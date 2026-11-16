@@ -4,12 +4,14 @@
 
 import { api, signedIn } from './account.js';
 
-const fam = (db) => (db.family ||= { books: [], recipes: {}, cursors: {}, name: '' });
+const fam = (db) => { db.family ||= { books: [], recipes: {}, cursors: {}, name: '' }; db.family.lists ||= {}; return db.family; };
+// A book can also hold one shared grocery list, stored as the item "__grocery".
+export const LIST_ID = '__grocery';
 
 export function familyRecipes(db) {
   const f = fam(db);
   const out = [];
-  for (const b of f.books) for (const r of Object.values(f.recipes[b.id] || {})) out.push({ ...r.data, _book: b.id, _bookName: b.name, _by: r.by, _shared: true });
+  for (const b of f.books) for (const r of Object.values(f.recipes[b.id] || {})) if (!String(r.data?.id || '').startsWith('__')) out.push({ ...r.data, _book: b.id, _bookName: b.name, _by: r.by, _shared: true });
   return out.sort((a, b) => (b._updated || 0) - (a._updated || 0));
 }
 
@@ -66,6 +68,7 @@ export async function pullBooks(db) {
       const since = f.cursors[b.id] ? `&updated_at=gt.${encodeURIComponent(f.cursors[b.id])}` : '';
       const rows = await api(`bitrecipe_book_recipes?select=id,data,deleted,added_name,updated_at&book_id=eq.${b.id}${since}&order=updated_at.asc&limit=100`);
       for (const r of rows) {
+        if (r.id === LIST_ID) { if (!r.deleted) f.lists[b.id] = { data: r.data, by: r.added_name, updated: Date.parse(r.updated_at) }; else delete f.lists[b.id]; f.cursors[b.id] = r.updated_at; n++; continue; }
         if (r.deleted) delete f.recipes[b.id][r.id];
         else f.recipes[b.id][r.id] = { data: { ...r.data, _updated: Date.parse(r.updated_at) }, by: r.added_name };
         f.cursors[b.id] = r.updated_at;
@@ -76,3 +79,10 @@ export async function pullBooks(db) {
   }
   return n;
 }
+
+// Shared grocery list: the whole list (with small copies of the recipes it
+// uses, so everyone sees the same amounts) is one item in the book.
+export async function pushList(db, bookId, list) {
+  await api('rpc/bitrecipe_book_push', { method: 'POST', body: { b: bookId, my_name: fam(db).name || '', items: [{ id: LIST_ID, data: list, modified: list.modified || Date.now() }] } });
+}
+export const sharedList = (db, bookId) => fam(db).lists[bookId] || null;

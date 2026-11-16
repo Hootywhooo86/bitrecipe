@@ -59,6 +59,7 @@ import com.getcapacitor.annotation.PermissionCallback;
 )
 public class BitNativePlugin extends Plugin {
     private static String pending = null;
+    private static String pendingRoute = null;
     private static BitNativePlugin instance = null;
 
     @Override
@@ -68,6 +69,13 @@ public class BitNativePlugin extends Plugin {
     }
 
     public static void handleIntent(Intent intent) {
+        // App shortcuts (long-press the icon) open bitrecipe://list, ://ai, ://plan, ://last
+        if (intent != null && Intent.ACTION_VIEW.equals(intent.getAction()) && intent.getData() != null
+                && "bitrecipe".equals(intent.getData().getScheme())) {
+            pendingRoute = intent.getData().getHost();
+            if (instance != null) instance.notifyListeners("route", new JSObject());
+            return;
+        }
         if (intent == null || !Intent.ACTION_SEND.equals(intent.getAction())) return;
         String text = intent.getStringExtra(Intent.EXTRA_TEXT);
         if (text == null || text.isEmpty()) return;
@@ -81,6 +89,14 @@ public class BitNativePlugin extends Plugin {
         JSObject ret = new JSObject();
         ret.put("text", pending);
         pending = null;
+        call.resolve(ret);
+    }
+
+    @PluginMethod
+    public void takeRoute(PluginCall call) {
+        JSObject ret = new JSObject();
+        ret.put("route", pendingRoute);
+        pendingRoute = null;
         call.resolve(ret);
     }
 
