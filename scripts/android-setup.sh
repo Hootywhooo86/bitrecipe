@@ -65,6 +65,31 @@ open(p, 'w').write(s)
 PY
 fi
 
+# Timers v2: alarm-style ringing service (alarm audio stream gets through Do Not
+# Disturb), full-screen alarm on the lock screen, and the home-screen widget.
+if ! grep -q 'TimerRingService' "$MANIFEST"; then
+  python3 - "$MANIFEST" <<'PY'
+import sys
+p = sys.argv[1]
+s = open(p).read()
+perms = '''
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MEDIA_PLAYBACK" />
+    <uses-permission android:name="android.permission.USE_FULL_SCREEN_INTENT" />
+'''
+parts = '''
+        <service android:name=".TimerRingService" android:exported="false" android:foregroundServiceType="mediaPlayback" />
+        <receiver android:name=".TimerWidget" android:exported="false" android:label="bitrecipe timers">
+            <intent-filter><action android:name="android.appwidget.action.APPWIDGET_UPDATE" /></intent-filter>
+            <meta-data android:name="android.appwidget.provider" android:resource="@xml/bitrecipe_timer_widget_info" />
+        </receiver>
+'''
+s = s.replace('</manifest>', perms + '</manifest>')
+s = s.replace('</application>', parts + '    </application>')
+open(p, 'w').write(s)
+PY
+fi
+
 # App shortcuts (long-press the icon): Grocery list, AI chef, Meal plan, Last recipe.
 if ! grep -q 'android.app.shortcuts' "$MANIFEST"; then
   python3 - "$MANIFEST" <<'PY'

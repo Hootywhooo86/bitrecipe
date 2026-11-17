@@ -605,6 +605,7 @@ function settingsView() {
         ${row(st.notifications, 'Notifications', 'So timers ring when bitrecipe is closed or the screen is off.', '<button class="btn alt" data-perm="notifications">ALLOW</button>')}
         ${row(st.exactAlarms, 'On-the-second timing', 'Without it, Android may ring a timer up to a minute late.', '<button class="btn alt" data-perm="exact">FIX</button>')}
         ${row(st.dnd, 'Ring through Do Not Disturb', 'Timers already use the alarm sound, which Do Not Disturb lets through unless you muted alarms. Turn this on to get through even then.', '<button class="btn alt" data-perm="dnd">ALLOW</button>')}
+        <p class="hint" style="margin-top:8px">Running timers show a live countdown in your notifications and on the lock screen. For your home screen: long-press an empty spot › Widgets › bitrecipe timers.</p>
         <button class="btn ghost block" id="testTimer" style="margin-top:12px">TEST: RING IN 10 SECONDS</button>`}
     </div>
 
@@ -1370,6 +1371,19 @@ document.getElementById('timers').addEventListener('click', (e) => {
   if (t) stopTimer(t);
 });
 if (timers.length) tick();
+// Timers cancelled from their notification while bitrecipe was closed.
+async function syncNativeTimers() {
+  if (!BitNative) return;
+  try {
+    const { ids } = await BitNative.takeCancelledTimers();
+    const gone = String(ids || '').split(',').filter(Boolean).map(Number);
+    let n = 0;
+    for (const t of timers) if (gone.includes(t.nid) && !t.dismissed) { t.dismissed = true; n++; }
+    if (n) { saveTimers(); tick(); }
+  } catch { /* older app build */ }
+}
+syncNativeTimers();
+document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible') syncNativeTimers(); });
 
 // ---------- import flow ----------
 async function runImport(input) {

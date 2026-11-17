@@ -8,4 +8,5 @@
     <string name="sc_plan_long">This week’s meal plan</string>
     <string name="sc_last">Last recipe</string>
     <string name="sc_last_long">Open my last recipe</string>
+    <string name="bw_description">Live countdowns of your cooking timers</string>
 </resources>

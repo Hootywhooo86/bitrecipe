@@ -220,6 +220,8 @@ public class BitNativePlugin extends Plugin {
         } else {
             am.setAndAllowWhileIdle(AlarmManager.RTC_WAKEUP, at, fire);
         }
+        // live countdown in the notifications + home-screen widget
+        TimerStore.add(ctx, id, at, label, recipe);
         JSObject r = status();
         r.put("exact", exactAlarmsAllowed());
         call.resolve(r);
@@ -233,7 +235,17 @@ public class BitNativePlugin extends Plugin {
         AlarmManager am = (AlarmManager) ctx.getSystemService(Context.ALARM_SERVICE);
         am.cancel(TimerReceiver.fireIntent(ctx, id, "", ""));
         ((NotificationManager) ctx.getSystemService(Context.NOTIFICATION_SERVICE)).cancel(id);
+        TimerStore.remove(ctx, id);
+        TimerRingService.silence(ctx);
         call.resolve();
+    }
+
+    /** Timers cancelled from their notification while the app was closed. */
+    @PluginMethod
+    public void takeCancelledTimers(PluginCall call) {
+        JSObject r = new JSObject();
+        r.put("ids", TimerStore.takeCancelled(getContext()));
+        call.resolve(r);
     }
 
     // ---------- sharing, links, files ----------

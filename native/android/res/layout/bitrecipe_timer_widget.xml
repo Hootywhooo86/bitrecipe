@@ -1,0 +1,21 @@
+<?xml version="1.0" encoding="utf-8"?>
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:id="@+id/bw_root" android:layout_width="match_parent" android:layout_height="match_parent"
+    android:orientation="vertical" android:padding="12dp" android:background="@drawable/bitrecipe_widget_bg">
+    <TextView android:layout_width="wrap_content" android:layout_height="wrap_content"
+        android:text="BITRECIPE TIMERS" android:textColor="#FFCC33" android:textSize="11sp" android:textStyle="bold" android:letterSpacing="0.1" />
+    <TextView android:id="@+id/bw_empty" android:layout_width="wrap_content" android:layout_height="wrap_content" android:layout_marginTop="6dp"
+        android:text="No timers running. Tap to open bitrecipe." android:textColor="#B8B8D0" android:textSize="13sp" />
+    <LinearLayout android:id="@+id/bw_row1" android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginTop="6dp" android:orientation="horizontal" android:visibility="gone">
+        <TextView android:id="@+id/bw_label1" android:layout_width="0dp" android:layout_weight="1" android:layout_height="wrap_content" android:textColor="#FFFFFF" android:textSize="15sp" android:maxLines="1" android:ellipsize="end" />
+        <Chronometer android:id="@+id/bw_clock1" android:layout_width="wrap_content" android:layout_height="wrap_content" android:textColor="#7DFF9A" android:textSize="18sp" android:textStyle="bold" />
+    </LinearLayout>
+    <LinearLayout android:id="@+id/bw_row2" android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginTop="4dp" android:orientation="horizontal" android:visibility="gone">
+        <TextView android:id="@+id/bw_label2" android:layout_width="0dp" android:layout_weight="1" android:layout_height="wrap_content" android:textColor="#FFFFFF" android:textSize="15sp" android:maxLines="1" android:ellipsize="end" />
+        <Chronometer android:id="@+id/bw_clock2" android:layout_width="wrap_content" android:layout_height="wrap_content" android:textColor="#7DFF9A" android:textSize="18sp" android:textStyle="bold" />
+    </LinearLayout>
+    <LinearLayout android:id="@+id/bw_row3" android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginTop="4dp" android:orientation="horizontal" android:visibility="gone">
+        <TextView android:id="@+id/bw_label3" android:layout_width="0dp" android:layout_weight="1" android:layout_height="wrap_content" android:textColor="#FFFFFF" android:textSize="15sp" android:maxLines="1" android:ellipsize="end" />
+        <Chronometer android:id="@+id/bw_clock3" android:layout_width="wrap_content" android:layout_height="wrap_content" android:textColor="#7DFF9A" android:textSize="18sp" android:textStyle="bold" />
+    </LinearLayout>
+</LinearLayout>
