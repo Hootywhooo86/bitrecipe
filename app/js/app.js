@@ -235,7 +235,7 @@ function libraryView() {
   const fam = f === 'family';
   const pool = fam ? familyRecipes(db) : db.recipes;
   const list = pool.filter((r) => (!q || r.title.toLowerCase().includes(q) || r.ingredients.some((i) => i.item.toLowerCase().includes(q)))
-    && (fam || f === 'all' || (f === 'fav' ? r.fav : (r.tags || []).includes(f))));
+    && (fam || f === 'all' || (f === 'fav' ? r.fav : f === 'slow' ? methodOf(r) === 'slow cooker' : (r.tags || []).includes(f))));
   const tags = allTags();
   const hasFamily = (db.family?.books || []).length > 0;
   return `
@@ -261,9 +261,9 @@ function libraryView() {
       <input class="field grow" id="search" placeholder="Search recipes or ingredients…" value="${esc(session.search || '')}">
     </div>
     <div class="chips filters">
-      ${[['all', 'ALL'], ['fav', '★ FAVES'], ...tags.map((t) => [t, t.toUpperCase()]), ...(hasFamily ? [['family', '👪 FAMILY']] : [])].map(([k, l]) => `<button class="fchip${f === k ? ' on' : ''}" data-filter="${esc(k)}">${esc(l)}</button>`).join('')}
+      ${[['all', 'ALL'], ['fav', '★ FAVES'], ...(pool.some((r) => methodOf(r) === 'slow cooker') || f === 'slow' ? [['slow', '🍲 SLOW COOKER']] : []), ...tags.map((t) => [t, t.toUpperCase()]), ...(hasFamily ? [['family', '👪 FAMILY']] : [])].map(([k, l]) => `<button class="fchip${f === k ? ' on' : ''}" data-filter="${esc(k)}">${esc(l)}</button>`).join('')}
     </div>
-    <div class="h">${fam ? 'FAMILY COOKBOOK' : f === 'all' ? 'COOKBOOK' : f === 'fav' ? 'FAVOURITES' : esc(f.toUpperCase())} · ${list.length}</div>
+    <div class="h">${fam ? 'FAMILY COOKBOOK' : f === 'all' ? 'COOKBOOK' : f === 'fav' ? 'FAVOURITES' : f === 'slow' ? 'SLOW COOKER' : esc(f.toUpperCase())} · ${list.length}</div>
     ${list.length ? list.map((r) => `
       <div class="panel rcard" data-open="${esc(r._shared ? 'f:' + r.id : r.id)}">
         ${r.photo ? photoTag(r, 'thumb') : '<div class="strip"></div>'}
@@ -521,6 +521,11 @@ function recipeView(r) {
       ${shared ? '' : `<div class="row"><input class="field grow" id="noteIn" placeholder="Note for next time…"><button class="btn ghost" id="addNote">ADD</button></div>`}
     </div>` : ''}
     ${nutritionPanel(r)}
+    <div class="panel">
+      <div class="h">🍲 COOK IT ANOTHER WAY</div>
+      <p class="small muted" style="margin-bottom:10px">The AI chef rewrites it for a different appliance as a new version. Your original stays as it is.</p>
+      <div class="chips">${METHODS.filter(([k]) => k && k !== methodOf(r)).map(([k, l]) => `<button class="tchip" data-convert="${esc(k)}">${esc(l)}</button>`).join('')}</div>
+    </div>
     ${r.tips?.length ? `<div class="panel"><div class="h">✨ CHEF’S TIPS</div><ul class="tips">${r.tips.map((t) => `<li>${esc(t)}</li>`).join('')}</ul></div>` : ''}
 
     <div class="panel">
@@ -719,7 +724,14 @@ function fridgeView() {
 }
 
 // ---------- AI chef ----------
-const AI_IDEAS = ['Quick weeknight pasta', 'Use up ripe bananas', 'High-protein breakfast', 'Kid-friendly dinner', 'One-pan chicken', 'Vegan curry', 'Easy birthday cake', 'Meal-prep lunches'];
+// How the AI chef should cook it, and how "Cook it another way" converts a recipe.
+const METHODS = [['', 'ANY', ''], ['slow cooker', '🍲 SLOW COOKER', 'Make it in a slow cooker (crock pot), not the oven. Brown things in a pan first only if it really helps the flavour; everything else goes straight into a "Slow cooker" track. Give the LOW cooking time as the timer (hands-off) and mention the HIGH time in a tip. Slow cookers lose almost no liquid, so use less liquid than a stovetop or oven recipe.'],
+  ['oven', '♨ OVEN', 'Cook it in the oven.'], ['stovetop', '🔥 STOVETOP', 'Cook it on the stovetop only, no oven.'],
+  ['air fryer', '💨 AIR FRYER', 'Cook it in an air fryer, not the oven. Give air-fryer temperatures and times, and say when to shake or flip.'],
+  ['instant pot', '⚡ INSTANT POT', 'Cook it in an Instant Pot / electric pressure cooker: sauté mode first if useful, then pressure-cook on HIGH, with the natural or quick release as its own timed step.'],
+  ['no-cook', '🥗 NO COOK', 'No cooking at all: no oven, stove or appliances.']];
+const methodOf = (r) => { const t = [...(r.equipment || []), ...r.lanes.map((l) => l.name), ...r.steps.map((s) => s.text)].join(' ').toLowerCase(); return /slow cooker|crock ?pot/.test(t) ? 'slow cooker' : /instant pot|pressure cook/.test(t) ? 'instant pot' : /air fry/.test(t) ? 'air fryer' : /\boven\b|bake|roast/.test(t) ? 'oven' : /pan|pot|skillet|stove|simmer|boil|fry/.test(t) ? 'stovetop' : ''; };
+const AI_IDEAS = ['Slow cooker chili', 'Quick weeknight pasta', 'Use up ripe bananas', 'High-protein breakfast', 'Kid-friendly dinner', 'One-pan chicken', 'Vegan curry', 'Easy birthday cake', 'Meal-prep lunches'];
 function aiView() {
   const a = (db.ai ||= { engine: 'gemini', diet: '', servings: 4, time: '', useFridge: false });
   const eng = session.aiEngines;
@@ -741,6 +753,8 @@ function aiView() {
         <div class="grow"><label class="lbl">Serves</label><input class="field" type="number" min="1" max="50" id="aiServ" value="${esc(a.servings)}"></div>
         <div class="grow"><label class="lbl">Time</label><select class="field" id="aiTime">${[['', 'Any'], ['15 minutes', '15 min'], ['30 minutes', '30 min'], ['1 hour', '1 hour'], ['all afternoon', 'Lots']].map(([v, l]) => `<option value="${v}" ${a.time === v ? 'selected' : ''}>${l}</option>`).join('')}</select></div>
       </div>
+      <label class="lbl">Cook it in</label>
+      <div class="chips" style="margin-bottom:10px">${METHODS.map(([k, l]) => `<button class="tchip${(a.method || '') === k ? ' on' : ''}" data-method="${esc(k)}">${esc(l)}</button>`).join('')}</div>
       <label class="lbl">Diet, allergies, things to avoid</label>
       <input class="field" id="aiDiet" placeholder="e.g. no nuts, vegetarian, dairy-free" value="${esc(a.diet || '')}">
       <label class="row small" style="gap:8px;margin-top:12px"><input type="checkbox" id="aiFridge" ${a.useFridge ? 'checked' : ''}> Use what’s in my fridge (${(db.fridge?.have || []).length} ticked in 🧊 What can I make?)</label>
@@ -836,6 +850,7 @@ async function runAI(extra = {}) {
     const res = await callFunction('bitrecipe-ai', {
       prompt, engine: a.engine, model: a.models?.[a.engine] || undefined, models: a.models || {}, servings: extra.base ? undefined : a.servings, time: extra.base ? undefined : a.time,
       diet: a.diet, units: db.prefs.system === 'orig' ? null : db.prefs.system,
+      equipment: extra.base ? undefined : METHODS.find(([k]) => k && k === a.method)?.[2],
       have: a.useFridge && !extra.base ? db.fridge?.have || [] : [], base: extra.base,
     });
     const draft = aiToDraft(res.recipe, res.engine, res.model, extra.parent);
@@ -1490,6 +1505,7 @@ $app.addEventListener('click', async (e) => {
     };
     if (d.idea) { keepForm(); session.aiPrompt = d.idea; return rerender(); }
     if (d.engine) { keepForm(); db.ai.engine = d.engine; save(); return rerender(); }
+    if (d.method != null) { keepForm(); db.ai.method = d.method; save(); return rerender(); }
     if (t.id === 'aiGo') { keepForm(); save(); return runAI(); }
     if (t.id === 'aiRecheck') { toast('Checking the 128bit server…'); return refreshEngines(true); }
     db.ai.models ||= {};
@@ -1635,6 +1651,13 @@ $app.addEventListener('click', async (e) => {
     if (t.id === 'planIt') { session.planPick = session.planPick === r.id ? null : r.id; return rerender(); }
     if (d.planday) { togglePlan(d.planday, r.id); return rerender(); }
     if (t.id === 'shareCard') return shareCard(r);
+    if (d.convert) {
+      if (!signedIn()) { toast('Sign in to your 128bit account to use the AI chef'); return go('#/settings'); }
+      db.ai ||= { engine: 'gemini', diet: '', servings: 4, time: '', useFridge: false };
+      const how = METHODS.find(([k]) => k === d.convert);
+      const base = { title: r.title, servings: r.servings, ingredients: r.ingredients.map((i) => ({ id: i.id, qty: i.qty, qty2: i.qty2 ?? null, unit: i.unit, item: i.item, prep: i.prep || '', loose: i.loose || null })), lanes: r.lanes, steps: r.steps.map((s) => ({ lane: s.lane, text: s.text, merges: s.merges || [], timer: s.timer || null, wait: !!s.wait })), tips: r.tips || [] };
+      return runAI({ prompt: `Convert this recipe to a ${how[0]} version (call it "${r.title} (${how[0]})"). Keep the same dish and flavours. ${how[2]}`, base, parent: r._shared ? undefined : r.id });
+    }
     if (t.id === 'aiTweak') {
       if (!signedIn()) { toast('Sign in to your 128bit account to use the AI chef'); return go('#/settings'); }
       db.ai ||= { engine: 'gemini', diet: '', servings: 4, time: '', useFridge: false };

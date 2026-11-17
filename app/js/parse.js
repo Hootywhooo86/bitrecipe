@@ -220,7 +220,7 @@ export function parseText(text) {
 // ---------- step analysis: timers, waiting, lanes, equipment ----------
 
 const TIMER_RE = /(\d+(?:[.,]\d+)?)(?:\s*(?:-|–|to)\s*(\d+(?:[.,]\d+)?))?\s*(hours?|hrs?|h|minutes?|mins?|m)\b/i;
-const WAIT_RE = /\b(rest|chill|marinate|refrigerate|freeze|bake|roast|simmer|boil|proof|prove|rise|steep|soak|let (?:it |them )?(?:sit|cool|rest|rise))\b/i;
+const WAIT_RE = /\b(cook on (?:low|high)|slow[- ]cook|pressure[- ]cook|rest|chill|marinate|refrigerate|freeze|bake|roast|simmer|boil|proof|prove|rise|steep|soak|let (?:it |them )?(?:sit|cool|rest|rise))\b/i;
 const NEW_LANE_RE = /\b(?:in (?:a |another )?(?:separate|second|other|clean|small|medium|large)\s+(bowl|pan|pot|skillet|saucepan|jug|tray|dish))|\bmeanwhile\b|\bat the same time\b|\bwhile (?:that|the \w+) (?:cooks|bakes|rests|boils|simmers)\b/i;
 const OVEN_RE = /\bpreheat\b/i;
 const COMBINE_RE = /\b(combine|add|pour|fold|stir|tip|transfer|toss|mix|scoop|spoon|drain|return)\b/i;
@@ -233,8 +233,8 @@ const GROUPS = [
   ['sauce', 'dressing', 'glaze'],
   ['veg', 'vegetables', 'veggies'],
 ];
-const VESSEL_RE = /\b(bowl|pan|pot|skillet|saucepan|jug|tray|dish|oven|blender|wok)\b/i;
-const EQUIP = ['mixing bowl', 'bowl', 'pan', 'whisk', 'frying pan', 'skillet', 'saucepan', 'pot', 'baking sheet', 'baking tray', 'tray', 'sheet pan', 'oven', 'blender', 'food processor', 'stand mixer', 'hand mixer', 'mixer', 'air fryer', 'wok', 'grill', 'slow cooker', 'instant pot', 'loaf tin', 'cake tin', 'spatula', 'tongs', 'rolling pin', 'baking dish', 'jug', 'microwave'];
+const VESSEL_RE = /\b(slow cooker|crock ?pot|instant pot|pressure cooker|air fryer|dutch oven|bowl|pan|pot|skillet|saucepan|jug|tray|dish|oven|blender|wok)\b/i;
+const EQUIP = ['mixing bowl', 'bowl', 'pan', 'whisk', 'frying pan', 'skillet', 'saucepan', 'pot', 'baking sheet', 'baking tray', 'tray', 'sheet pan', 'oven', 'blender', 'food processor', 'stand mixer', 'hand mixer', 'mixer', 'air fryer', 'wok', 'grill', 'slow cooker', 'crock pot', 'crockpot', 'instant pot', 'pressure cooker', 'dutch oven', 'loaf tin', 'cake tin', 'spatula', 'tongs', 'rolling pin', 'baking dish', 'jug', 'microwave'];
 
 export function timerFrom(text, fallback = 'Timer') {
   const m = text.match(TIMER_RE);
@@ -243,13 +243,18 @@ export function timerFrom(text, fallback = 'Timer') {
   if (/^h/i.test(m[3])) min *= 60;
   if (min <= 0 || min > 24 * 60) return null;
   const low = text.toLowerCase();
+  const slow = low.match(/\b(?:cook )?on (low|high)\b/);
+  if (slow || /slow[- ]cook|crock ?pot/.test(low)) return { min: Math.round(min), label: `Slow cook${slow ? ' ' + slow[1].toUpperCase() : ''}` };
+  if (/pressure[- ]cook|instant pot/.test(low)) return { min: Math.round(min), label: 'Pressure cook' };
   const verb = VERBS.find((v) => new RegExp(`\\b${v}`).test(low));
   return { min: Math.round(min), label: verb ? cap(verb) : fallback };
 }
 
 function laneName(text, fallback) {
   const v = text.match(VESSEL_RE);
-  return v ? v[1][0].toUpperCase() + v[1].slice(1).toLowerCase() : fallback;
+  if (!v) return fallback;
+  if (/crock|slow/i.test(v[1])) return 'Slow cooker';
+  return v[1][0].toUpperCase() + v[1].slice(1).toLowerCase();
 }
 
 const VERBS = ['boil', 'melt', 'fry', 'bake', 'simmer', 'rest', 'chill', 'cook', 'roast', 'beat', 'whisk', 'knead', 'toss', 'sear', 'saute', 'sauté', 'marinate', 'steam', 'grill', 'toast', 'blend', 'proof', 'prove', 'rise', 'cool', 'soak', 'reduce', 'caramelise', 'caramelize', 'brown', 'microwave', 'air fry'];
@@ -346,7 +351,8 @@ export function guessEquipment(texts) {
   const all = texts.join(' ').toLowerCase();
   const found = [];
   for (const e of EQUIP) if (new RegExp(`\\b${e}s?\\b`).test(all) && !found.some((f) => f.includes(e))) found.push(e);
-  return found.map((e) => e[0].toUpperCase() + e.slice(1));
+  // "pot" is already covered by "crock pot", "pan" by "frying pan"…
+  return found.filter((e) => !found.some((f) => f !== e && f.includes(e))).map((e) => e[0].toUpperCase() + e.slice(1));
 }
 
 // ---------- linking ingredients into step text ----------
