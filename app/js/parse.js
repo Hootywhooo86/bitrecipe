@@ -47,7 +47,7 @@ export function cleanLine(line) {
 // "2 1/4 cups flour, sifted" -> {qty, qty2, unit, item, prep}
 export function parseIngredientLine(raw) {
   // "pinch of salt" / "dash of hot sauce" mean one pinch / dash
-  const line = wordNums(cleanLine(raw)).replace(/^(pinch|dash|sprig|clove|knob)\b/i, '1 $1');
+  const line = wordNums(cleanLine(raw)).replace(/^(pinch|dash|sprig|clove|knob)\b/i, (m) => '1 ' + m.toLowerCase());
   if (!line) return null;
   const ing = { id: newId('i'), qty: null, unit: '', item: line, prep: '', raw: line };
   const m = line.match(ING_RE);
@@ -62,7 +62,13 @@ export function parseIngredientLine(raw) {
   }
   const notes = [];
   rest = rest.replace(/\s*\(([^)]*)\)\s*/g, (_, inner) => { notes.push(inner.trim()); return ' '; }).trim();
-  const comma = rest.indexOf(',');
+  // "boneless, skinless chicken breasts": a describing word before the comma is part of the item
+  let comma = rest.indexOf(',');
+  while (comma > 0 && /^(?:[\w-]+,\s*)*(boneless|skinless|bone-in|skin-on|fresh|ripe|large|small|medium|extra[- ]large|unsalted|salted|hot|cold|dried|lean|thick|thin|firm|soft|whole|raw|cooked|frozen|organic|sweet|red|green|yellow|white|dark|light)$/i.test(rest.slice(0, comma).trim())) {
+    const next = rest.indexOf(',', comma + 1);
+    if (next < 0) { comma = -1; break; }
+    comma = next;
+  }
   ing.item = (comma > 0 ? rest.slice(0, comma) : rest).trim();
   ing.prep = [comma > 0 ? rest.slice(comma + 1).trim() : '', ...notes].filter(Boolean).join(', ');
   const loose = line.match(LOOSE_RE);
@@ -101,6 +107,64 @@ function splitInline(text) {
     .replace(/:[^\S\n]+(?=\S)/g, (m, i, str) => (/\n[^\n]{0,30}$/.test(str.slice(Math.max(0, i - 31), i)) || i < 30 ? ':\n' : m))
     .replace(/\s*\b(ingredients|method|instructions|directions|steps)\s*:/gi, '\n$1:')
     .replace(/\s+(?=(?:step\s*)?\d{1,2}[.)]\s+[A-Z])/g, '\n');
+}
+
+// AI chat answers (Gemini, ChatGPT, Claude…) come as Markdown with a chatty
+// intro and outro: "## Title", "**Ingredients**", "* 1 cup…", "1. **Sear:** Heat…",
+// "Prep time: 10 min | Servings: 4". Turn that into plain recipe text.
+const TIPS_HEAD = /^(?:chef'?s?\s+)?(?:tips?|notes?|variations?|serving suggestions?|storage|to serve|make[- ]ahead|substitutions?)\b.{0,20}:?$/i;
+const CHATTER = /^(?:(?:enjoy|happy cooking|bon app[eé]tit|let me know|would you like|do you want|i hope|hope you|here(?:'|’)s|here is|of course|great choice|absolutely|certainly)\b|sure[!,.])/i;
+export function looksLikeMarkdown(text) {
+  return /^#{1,6}\s/m.test(text) || /\*\*[^*\n]+\*\*/.test(text) || /^\s*[*-]\s+\S/m.test(text) && /^\s*\d+\.\s/m.test(text);
+}
+export function fromMarkdown(text) {
+  const meta = { totalTime: null, activeTime: null, tips: [] };
+  let lines = text.replace(/\r/g, '').split('\n')
+    // "1. **Sear:** Heat the oil" -> "1. Heat the oil" (the label is just decoration)
+    .map((l) => l.replace(/^(\s*(?:\d+[.)]|[*-])\s+)\*\*[^*\n]{1,40}?:?\*\*:?\s+(?=\S)/, '$1'))
+    // a line that is all bold ("**Easy Banana Bread**", "**Ingredients:**") is a heading
+    .map((l) => l.replace(/^\s*\*\*([^*\n]{2,60}?):?\*\*:?\s*$/, '## $1'))
+    .map((l) => l.replace(/\*\*|__/g, '').replace(/^\s*>\s?/, '').replace(/`/g, ''))
+    .flatMap((l) => (/\|/.test(l) && !/^\s*\|/.test(l) ? l.split(/\s*\|\s*/) : [l]))
+    .map((l) => l.replace(/^\s*[*-]\s+/, '• ').trim());
+  // markdown tables: | 2 cups | flour | -> "2 cups flour"
+  lines = lines.flatMap((l) => {
+    if (!/^\|.*\|$/.test(l)) return [l];
+    if (/^\|[\s:|-]+\|$/.test(l)) return [];
+    const cells = l.slice(1, -1).split('|').map((c) => c.trim()).filter(Boolean);
+    if (cells.some((c) => /^(ingredient|amount|quantity|item)s?$/i.test(c))) return ['## Ingredients'];
+    // "| spaghetti | 200 g |" -> "200 g spaghetti"
+    if (cells.length === 2 && new RegExp(`^${QTY}`).test(wordNums(cells[1])) && !new RegExp(`^${QTY}`).test(cells[0])) return [`${cells[1]} ${cells[0]}`];
+    return [cells.join(' ')];
+  });
+  // title: the first heading that isn't "Ingredients"/"Instructions"; drop the chat before it
+  const heads = lines.map((l, i) => [l, i]).filter(([l]) => /^#{1,6}\s/.test(l));
+  const titleHead = heads.find(([l]) => { const t = l.replace(/^#+\s*/, ''); return !ING_HEAD.test(t) && !STEP_HEAD.test(t) && !TIPS_HEAD.test(t); });
+  let title = '';
+  if (titleHead && titleHead[1] <= (heads[0]?.[1] ?? 0) + 1) { title = titleHead[0].replace(/^#+\s*/, '').replace(/[\p{Extended_Pictographic}\uFE0F\u200D]/gu, '').trim(); lines = lines.slice(titleHead[1] + 1); }
+  else if (heads.length) lines = lines.slice(heads[0][1]);
+  const out = [];
+  let inTips = false;
+  for (let l of lines) {
+    l = l.replace(/^#{1,6}\s*/, '').trim();
+    if (!l || /^[-*_]{3,}$/.test(l)) continue;
+    const t = l.match(/^(?:•\s*)?(prep(?:aration)?|cook(?:ing)?|total|active|hands[- ]on)\s*time\s*:?\s*(?:about\s*)?(\d+)\s*(?:-\s*\d+\s*)?(h|hours?|hrs?|m|mins?|minutes?)\b(?:\s*(\d+)\s*(?:m|mins?|minutes?))?/i);
+    if (t) {
+      const min = (/^h/i.test(t[3]) ? +t[2] * 60 : +t[2]) + (t[4] ? +t[4] : 0);
+      if (/total/i.test(t[1])) meta.totalTime = min;
+      else if (/prep|active|hands/i.test(t[1])) meta.activeTime = (meta.activeTime || 0) + min;
+      else meta.cookTime = min;
+      continue;
+    }
+    l = l.replace(/^(?:•\s*)?(?:servings|serves|yield|makes)\s*:\s*(?:about\s*)?(\d+)/i, 'Serves $1');
+    if (TIPS_HEAD.test(l.replace(/^•\s*/, ''))) { inTips = true; continue; }
+    if (ING_HEAD.test(l) || (STEP_HEAD.test(l) && l.length < 40)) inTips = false;
+    if (CHATTER.test(l.replace(/^•\s*/, ''))) continue;
+    if (inTips) { const tip = l.replace(/^•\s*/, ''); if (tip.length > 3) meta.tips.push(tip); continue; }
+    out.push(l);
+  }
+  if (!meta.totalTime && (meta.activeTime || meta.cookTime)) meta.totalTime = (meta.activeTime || 0) + (meta.cookTime || 0);
+  return { text: (title ? title + '\n' : '') + out.join('\n'), title, meta };
 }
 
 // Text -> {title, ingredients[], steps[], sections[]}
@@ -548,15 +612,31 @@ export async function importUrl(url) {
 }
 
 export function importText(text) {
+  if (looksLikeMarkdown(text)) {
+    const md = fromMarkdown(text);
+    const parsed = parseText(md.text);
+    if (md.title) parsed.title = md.title.replace(/\s+recipe$/i, '').slice(0, 80);
+    const draft = buildDraft({ ...parsed, totalTime: md.meta.totalTime, activeTime: md.meta.activeTime, source: { platform: 'text', creator: '', url: '' }, flags: [] });
+    if (md.meta.tips.length) draft.recipe.tips = md.meta.tips.slice(0, 5);
+    return draft;
+  }
   const parsed = parseText(text);
   return buildDraft({ ...parsed, source: { platform: 'text', creator: '', url: '' }, flags: [] });
 }
+
+// Links to AI chats only open in a signed-in browser, so they can't be read here.
+const AI_SHARE = /(?:gemini\.google\.com\/share|share\.gemini\.google|g\.co\/gemini|chatgpt\.com\/share|chat\.openai\.com\/share|claude\.ai\/share)/i;
 
 export async function importAnything(input) {
   const t = input.trim();
   const url = t.match(/https?:\/\/\S+/)?.[0]?.replace(/[)\].,!]+$/, '');
   if (!url) return importText(t);
   const rest = t.replace(url, '').trim();
+  if (AI_SHARE.test(url)) {
+    if (rest.length >= 40) return importText(rest);
+    const who = /chatgpt|openai/i.test(url) ? 'ChatGPT' : /claude/i.test(url) ? 'Claude' : 'Gemini';
+    throw new Error(`${who} share links can’t be opened by other apps. In ${who}, tap Copy under the recipe answer (or long-press it and Copy), then paste it here. bitrecipe tidies up the AI formatting for you.`);
+  }
   // Always try the link first (shares from TikTok/Instagram add extra words);
   // fall back to the shared text itself if the link gives us nothing.
   let fromLink = null, linkError = null;

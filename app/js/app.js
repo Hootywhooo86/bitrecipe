@@ -332,6 +332,7 @@ function addView() {
         <li><b>Recipe sites:</b> reads the hidden recipe card most sites include. Best results.</li>
         <li><b>TikTok:</b> reads the caption. If the recipe is only spoken, paste the steps.</li>
         <li><b>Reels:</b> reads the caption when Instagram allows it.</li>
+        <li><b>Gemini, ChatGPT &amp; other AI chats:</b> tap Copy under the recipe answer and paste it here, or Share it to bitrecipe. (Their share links can’t be read by other apps.) The AI formatting is tidied up for you, and ✨ Fix it with AI is there if anything’s off.</li>
         <li><b>Anything else:</b> paste the text — captions, notes, a message from Grandma.</li>
       </ul>
       <p class="small muted" style="margin-top:10px">You always get to check everything before saving. Missing amounts are flagged, never guessed. Saved recipes stay private on your phone.</p>
@@ -351,6 +352,10 @@ function reviewView() {
   <header class="top"><button class="icon-btn" data-back aria-label="Back">◀</button><div class="title">${session.writing ? 'WRITE A RECIPE' : session.editing ? 'EDIT RECIPE' : 'CHECK IT'}</div></header>
   <main>
     ${session.flags.map((f) => `<div class="flag ${f.level}">${esc(f.text)}</div>`).join('')}
+    ${d.importDebug?.input && !session.editing ? `<div class="panel aifix">
+      <p class="small">${!d.ingredients.length || !d.steps.length ? '<b>This didn’t read well.</b> ' : ''}Something off? The AI chef can re-read the original text into a clean Track Map, keeping its amounts.</p>
+      <button class="btn ai block" id="aiFix" ${session.aiFixBusy ? 'disabled' : ''}>${session.aiFixBusy ? 'RE-READING… (10–40 S)' : '✨ FIX IT WITH AI'}</button>
+    </div>` : ''}
     <div class="panel photopick">
       ${d.photo ? `<img class="heroimg" src="${d.photo}" alt="">` : d.image ? '<p class="hint">📷 Photo found on the page — it’s saved with the recipe.</p>' : '<p class="hint">No photo yet.</p>'}
       <div class="row" style="margin-top:10px">
@@ -849,6 +854,30 @@ async function runAI(extra = {}) {
     refreshEngines(true);
     if (extra.base) toast(e.message); else rerender();
   }
+}
+
+// Re-read an import's original text with the AI (great for Gemini/ChatGPT answers).
+async function aiFixImport() {
+  const d = session.draft;
+  if (!d?.importDebug?.input || session.aiFixBusy) return;
+  if (!signedIn()) { toast('Sign in to your 128bit account to use the AI chef'); return go('#/settings'); }
+  syncDraft();
+  session.aiFixBusy = true; rerender();
+  try {
+    const res = await callFunction('bitrecipe-ai', { task: 'text', text: d.importDebug.input, engine: db.ai?.engine, model: db.ai?.models?.[db.ai?.engine] || undefined, models: db.ai?.models || {} });
+    const fresh = aiToDraft(res.recipe, res.engine, res.model);
+    // keep what the import already knew: link, creator, photo
+    fresh.source = { ...d.source, model: res.model };
+    for (const k of ['image', 'photo', 'photoV', 'importDebug']) if (d[k]) fresh[k] = d[k];
+    fresh.id = d.id;
+    session.draft = fresh;
+    session.flags = [
+      { level: 'good', text: '✨ Re-read by the AI chef. Check it against the original, then save.' },
+      ...(typeof res.remaining === 'number' ? [{ level: 'info', text: `${res.remaining} AI recipe${res.remaining === 1 ? '' : 's'} left today.` }] : []),
+    ];
+    track('ai');
+  } catch (e) { toast(e.message); }
+  session.aiFixBusy = false; rerender();
 }
 
 // Photo of a recipe page -> Gemini reads it -> the usual check-it screen.
@@ -1560,6 +1589,7 @@ $app.addEventListener('click', async (e) => {
     if (t.id === 'addIng') { syncDraft(); dr.ingredients.push({ id: 'i' + Date.now().toString(36), qty: null, unit: '', item: '', raw: '', edited: true }); return rerender(); }
     if (t.id === 'addStep') { syncDraft(); dr.steps.push({ id: 's' + Date.now().toString(36), lane: dr.steps.at(-1)?.lane || dr.lanes[0].id, text: '', merges: [] }); return rerender(); }
     if (t.id === 'addLane') { syncDraft(); const id = ['A', 'B', 'C'].find((l) => !dr.lanes.some((x) => x.id === l)); dr.lanes.push({ id, name: `Track ${id}` }); return rerender(); }
+    if (t.id === 'aiFix') return aiFixImport();
     if (t.id === 'report') { syncDraft(); return shareOut(importReport(finalize(structuredClone(dr), true)), 'bitrecipe import report'); }
     if (t.id === 'photoOut') { syncDraft(); delete dr.photo; delete dr.photoV; dr.image = null; return rerender(); }
     if (t.id === 'saveDraft') {

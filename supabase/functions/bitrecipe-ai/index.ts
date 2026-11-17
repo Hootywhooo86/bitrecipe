@@ -313,7 +313,7 @@ function normalize(x: Record<string, unknown>): Recipe {
     timer: s.timer && Number(s.timer.min) > 0 ? { min: Math.round(Number(s.timer.min)), label: String(s.timer.label || "Timer") } : null, wait: !!s.wait,
   }));
   r.tips = arr(r.tips).map(String).slice(0, 3);
-  if (/^not a recipe$/i.test(r.title.trim())) throw fail(422, "That photo doesn't look like a recipe. Try a clearer shot of the page.");
+  if (/^not a recipe$/i.test(r.title.trim())) throw fail(422, "That doesn't look like a recipe. Try a clearer photo, or paste the whole recipe text.");
   if (!r.ingredients.length || !r.steps.length) throw fail(502, "The AI chef sent an incomplete recipe. Try again.");
   return r as Recipe;
 }
@@ -632,6 +632,15 @@ const PHOTO_PROMPT = `These photos show a recipe (a cookbook page, a handwritten
 - If an amount can't be read, use qty null (don't guess).
 - If the photos don't show a recipe, return the title "Not a recipe" with empty ingredients and steps.`;
 
+const TEXT_PROMPT = `Below is a recipe the cook copied from somewhere (an AI chat like Gemini or ChatGPT, a website, a message). Copy it into bitrecipe's format.
+- Keep its own title, amounts, ingredients, servings, times, method and tips. Don't invent, change or "improve" anything; only split the method into clear steps and assign tracks.
+- Ignore chatty text that isn't part of the recipe ("Here's a recipe…", "Let me know…").
+- If an amount isn't given, use qty null (don't guess).
+- If the text isn't a recipe, return the title "Not a recipe" with empty ingredients and steps.
+
+The text:
+`;
+
 function readImages(x: unknown): Img[] {
   if (!Array.isArray(x)) return [];
   let total = 0;
@@ -700,10 +709,13 @@ Deno.serve(async (req) => {
   }
 
   const photo = body.task === "photo";
+  const fromText = body.task === "text"; // tidy copied recipe text (e.g. from Gemini) into the app's format
   let images: Img[] = [];
   if (photo) {
     try { images = readImages(body.images); } catch (e) { return reply(413, { error: (e as Error).message }); }
     if (!images.length) return reply(400, { error: "Add a photo of the recipe first." });
+  } else if (fromText) {
+    if (String(body.text ?? "").trim().length < 20) return reply(400, { error: "Paste the recipe text first." });
   } else if (!String(body.prompt ?? "").trim()) return reply(400, { error: "Say what you'd like to make." });
 
   const avail = configured();
@@ -719,7 +731,9 @@ Deno.serve(async (req) => {
     return reply((e as { status?: number }).status ?? 500, { error: (e as Error).message });
   }
   const t0 = Date.now();
-  const prompt = photo ? PHOTO_PROMPT + (body.prompt ? `\nNotes from the cook: ${String(body.prompt).slice(0, 300)}` : "") : buildPrompt(body);
+  const prompt = photo ? PHOTO_PROMPT + (body.prompt ? `\nNotes from the cook: ${String(body.prompt).slice(0, 300)}` : "")
+    : fromText ? TEXT_PROMPT + String(body.text).slice(0, 14000)
+    : buildPrompt(body);
   const pick = typeof body.model === "string" && MODEL_ID.test(body.model) && engine === want && !photo ? body.model : undefined;
   const backup = BACKUP[engine] && avail[BACKUP[engine]!] && body.noBackup !== true ? (BACKUP[engine] as Engine) : null;
   try {
@@ -727,7 +741,7 @@ Deno.serve(async (req) => {
     const first = await testLike(engine, pick, prompt, backup ? 45_000 : 110_000, images);
     if (first.ok && photo && !first.recipe!.steps.length) throw fail(422, "That photo doesn't look like a recipe. Try a clearer shot of the page.");
     if (first.ok) {
-      log({ engine, model: first.model, ok: true, ms: Date.now() - t0, photo });
+      log({ engine, model: first.model, ok: true, ms: Date.now() - t0, task: photo ? "photo" : fromText ? "text" : "make" });
       return reply(200, { recipe: tidy(first.recipe!), remaining, engine, model: first.model });
     }
     log({ engine, model: pick, ok: false, ms: Date.now() - t0, error: first.error?.slice(0, 200) });
