@@ -1217,7 +1217,7 @@ function renderCook() {
     const pct = Math.round((c.i / r.steps.length) * 100);
     const running = timers.filter((t) => t.recipe === r.id && t.end > Date.now()).map((t) => t.label);
     el.innerHTML = `
-      <div class="bar"><button class="icon-btn" id="cookClose" aria-label="Close">✕</button><div class="quest"><i style="width:${pct}%"></i></div><span class="px" style="font-size:10px">${c.i + 1}/${r.steps.length}</span>
+      <div class="bar"><button class="icon-btn" id="cookClose" aria-label="Close">✕</button><div class="quest"><i style="width:${pct}%"></i></div><span class="px" style="font-size:15px">${c.i + 1}/${r.steps.length}</span>
         <button class="icon-btn${voice?.on ? ' on' : ''}" id="voiceBtn" aria-label="Hands-free voice control">🎙</button><button class="icon-btn${db.prefs.readAloud !== false ? ' on' : ''}" id="readBtn" aria-label="Read steps aloud">🔊</button></div>
 
       <div class="stage ${c.dir || ''}">

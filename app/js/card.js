@@ -42,7 +42,7 @@ function wrap(ctx, text, maxW) {
 }
 
 export async function recipeCard(recipe, ctx) {
-  try { await document.fonts.load('28px Pixel'); } catch { /* falls back */ }
+  try { await document.fonts.load('50px Pixel'); } catch { /* falls back */ }
   const C = { bg: css('--bg', '#0b0b16'), panel: css('--panel', '#141428'), edge: css('--edge', '#2a2a4a'), ink: css('--ink', '#f4f1ff'), muted: css('--muted', '#9a97b8'), accent: css('--accent', '#ff5d5d'), accent2: css('--accent2', '#facc15') };
   const sans = 'system-ui, -apple-system, Roboto, sans-serif';
   const photo = recipe.photo ? await loadImg(recipe.photo) : null;
@@ -81,7 +81,7 @@ export async function recipeCard(recipe, ctx) {
   const meta = [`Serves ${ctx.servings}`, recipe.time?.total ? `${recipe.time.total} min` : '', recipe.source?.creator ? `by ${recipe.source.creator}` : ''].filter(Boolean).join('  ·  ');
   g.fillText(meta, PAD, y + 4); y += 80;
 
-  const heading = (t) => { g.fillStyle = C.accent; g.font = `26px Pixel, monospace`; g.fillText(t, PAD, y); y += 56; };
+  const heading = (t) => { g.fillStyle = C.accent; g.font = `50px Pixel, monospace`; g.fillText(t, PAD, y); y += 56; };
   heading('INGREDIENTS');
   g.font = `34px ${sans}`;
   ingLines.forEach((lines, k) => {
@@ -102,7 +102,7 @@ export async function recipeCard(recipe, ctx) {
   y += 40;
   heading('METHOD');
   steps.forEach((lines, k) => {
-    g.fillStyle = C.accent2; g.font = `24px Pixel, monospace`;
+    g.fillStyle = C.accent2; g.font = `44px Pixel, monospace`;
     g.fillText(String(k + 1).padStart(2, '0'), PAD, y);
     g.fillStyle = C.ink; g.font = `34px ${sans}`;
     lines.forEach((l) => { g.fillText(l, PAD + 80, y); y += 46; });
@@ -112,7 +112,7 @@ export async function recipeCard(recipe, ctx) {
   y = H - 110;
   g.fillStyle = C.edge; g.fillRect(PAD, y, inner, 4);
   if (logo) g.drawImage(logo, PAD, y + 22, 64, 64);
-  g.fillStyle = C.ink; g.font = `24px Pixel, monospace`;
+  g.fillStyle = C.ink; g.font = `44px Pixel, monospace`;
   g.fillText('bitrecipe', PAD + 84, y + 66);
   g.fillStyle = C.muted; g.font = `26px ${sans}`;
   const tail = 'made with bitrecipe';
